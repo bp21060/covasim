@@ -67,6 +67,9 @@ class Sim(cvb.BaseSim):
         self._default_ver  = version  # Default version of parameters used
         self._legacy_trans = None     # Whether to use the legacy transmission calculation method (slower; for reproducing earlier results)
         self._orig_pars    = None     # Store original parameters to optionally restore at the end of the simulation
+        
+        #追加部分
+        #self.elderly_people = None
 
         # Make default parameters (using values from parameters.py)
         default_pars = cvpar.make_pars(version=version) # Start with default pars
@@ -347,6 +350,9 @@ class Sim(cvb.BaseSim):
         self.results['date'] = self.datevec
         self.results['t']    = self.tvec
         self.results_ready   = False
+
+        #追加部分
+        self.results['elderly_infectious'] = init_res('Population of elderly people infectious')
 
         return
 
@@ -672,7 +678,13 @@ class Sim(cvb.BaseSim):
         self.results['pop_nabs'][t]            = np.sum(people.nab[inds_alive[cvu.true(people.nab[inds_alive])]])/len(inds_alive)
         self.results['pop_protection'][t]      = np.nanmean(people.sus_imm)
         self.results['pop_symp_protection'][t] = np.nanmean(people.symp_imm)
-
+        
+        #追加部分
+        #テスト
+        #print(self.people.infection_log())
+        
+        self.results['elderly_infectious'][t] =  sum((self.people.infectious) & (self.people.age >= 65))
+        
         # Apply analyzers -- same syntax as interventions
         for i,analyzer in enumerate(self['analyzers']):
             analyzer(self)
@@ -731,6 +743,14 @@ class Sim(cvb.BaseSim):
             errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
         if errormsg:
             raise AlreadyRunError(errormsg)
+            
+        #追加部分
+        #高齢者の定義をする
+        #self.elderly_people = [p for p in self.people if p.age >= 65]
+        
+        #テスト
+        #print(len(self.elderly_people))
+        
 
         # Main simulation loop
         while self.t < until:

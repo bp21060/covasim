@@ -782,6 +782,80 @@ class Sim(cvb.BaseSim):
             self.finalize(verbose=verbose, restore_pars=restore_pars)
             sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
         return self
+    
+    #追加関数
+    #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
+    def condition_end_run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None):
+        
+        # 追加しました
+        print("時間経過or条件適合までをします")
+
+        # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
+        T = sc.timer()
+
+        if not self.initialized:
+            self.initialize()
+            self._orig_pars = sc.dcp(self.pars) # Create a copy of the parameters, to restore after the run, in case they are dynamically modified
+
+        if verbose is None:
+            verbose = self['verbose']
+
+        if reset_seed:
+            # Reset the RNG. If the simulation is newly created, then the RNG will be reset by sim.initialize() so the use case
+            # for resetting the seed here is if the simulation has been partially run, and changing the seed is required
+            self.set_seed()
+
+        # Check for AlreadyRun errors
+        errormsg = None
+        until = self.npts if until is None else self.day(until)
+        if until > self.npts:
+            errormsg = f'Requested to run until t={until} but the simulation end is t={self.npts}'
+        if self.t >= until: # NB. At the start, self.t is None so this check must occur after initialization
+            errormsg = f'Simulation is currently at t={self.t}, requested to run until t={until} which has already been reached'
+        if self.complete:
+            errormsg = 'Simulation is already complete (call sim.initialize() to re-run)'
+        if self.people.t not in [self.t, self.t-1]: # Depending on how the sim stopped, either of these states are possible
+            errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
+        if errormsg:
+            raise AlreadyRunError(errormsg)
+        
+
+        #icuの条件を満たしているかどうか
+        icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+        
+        # 死亡者数が5人超えるか，期間が終わるまで繰り返します．
+        while self.t < until and icu_judge:
+            
+            # Check if we were asked to stop
+            elapsed = T.toc(output=True)
+            if self['timelimit'] and elapsed > self['timelimit']:
+                sc.printv(f"Time limit ({self['timelimit']} s) exceeded; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+            elif self['stopping_func'] and self['stopping_func'](self):
+                sc.printv("Stopping function terminated the simulation; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+
+            # Print progress
+            if verbose:
+                simlabel = f'"{self.label}": ' if self.label else ''
+                string = f'  Running {simlabel}{self.datevec[self.t]} ({self.t:2.0f}/{self.pars["n_days"]}) ({elapsed:0.2f} s) '
+                if verbose >= 2:
+                    sc.heading(string)
+                elif verbose>0:
+                    if not (self.t % int(1.0/verbose)):
+                        sc.progressbar(self.t+1, self.npts, label=string, length=20, newline=True)
+
+            # Do the heavy lifting -- actually run the model!
+            self.step()
+            
+            #icu_maxの定義を更新
+            icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+
+        # If simulation reached the end, finalize the results
+        if self.complete:
+            self.finalize(verbose=verbose, restore_pars=restore_pars)
+            sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
+        return self
 
 
     def finalize(self, verbose=None, restore_pars=True):

@@ -70,6 +70,7 @@ class Sim(cvb.BaseSim):
         
         #追加部分
         #self.elderly_people = None
+        self.finish_time = None
 
         # Make default parameters (using values from parameters.py)
         default_pars = cvpar.make_pars(version=version) # Start with default pars
@@ -850,12 +851,19 @@ class Sim(cvb.BaseSim):
             
             #icu_maxの定義を更新
             icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+            
+            #icu_judgeの条件が適合していたら完了とする
+            if not icu_judge :
+                self.complete = True
 
         # If simulation reached the end, finalize the results
         if self.complete:
             self.finalize(verbose=verbose, restore_pars=restore_pars)
             sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
+            self.finish_time = self.t
+            
         return self
+
 
 
     def finalize(self, verbose=None, restore_pars=True):

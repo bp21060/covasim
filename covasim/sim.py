@@ -17,6 +17,7 @@ from . import interventions as cvi
 from . import immunity as cvimm
 from . import analysis as cva
 from .settings import options as cvo
+import sys
 
 # Almost everything in this file is contained in the Sim class
 __all__ = ['Sim', 'diff_sims', 'demo', 'AlreadyRunError']
@@ -70,7 +71,9 @@ class Sim(cvb.BaseSim):
         
         #追加部分
         #self.elderly_people = None
-        self.finish_time = None
+        self.finish_time = None #シミュレーション終了時刻
+        self.safety_point = sys.maxsize #最も安全な地点のリスク顕在化ポイント
+        self.point = None #現時点でのポイント
 
         # Make default parameters (using values from parameters.py)
         default_pars = cvpar.make_pars(version=version) # Start with default pars
@@ -793,6 +796,8 @@ class Sim(cvb.BaseSim):
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()
+        
+        
 
         if not self.initialized:
             self.initialize()
@@ -800,6 +805,9 @@ class Sim(cvb.BaseSim):
 
         if verbose is None:
             verbose = self['verbose']
+        
+        #icuの数を定義
+        self['n_beds_icu'] = icu_num
 
         if reset_seed:
             # Reset the RNG. If the simulation is newly created, then the RNG will be reset by sim.initialize() so the use case
@@ -863,6 +871,110 @@ class Sim(cvb.BaseSim):
             self.finish_time = self.t
             
         return self
+    
+    
+    #リスク顕在化ポイントを計算する関数
+    def cul_point(self) :
+        #ポイントは単純に重症者数ー現在の時刻にする．
+        self.point = (self.people.count('critical')+(sum(self.people.infectious)*0.1)) - (self['n_beds_icu'] / float(self['n_days'])) *  self.t
+        return self
+    
+    #シミュレーションしてリスクが顕在化しない最もよい地点だったら保存する．
+    def save_most_safety_point(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None):
+        
+        # 追加しました
+        print("リスクが顕在化しないパターンの生成を行います．")
+
+        # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
+        T = sc.timer()
+        
+
+        if not self.initialized:
+            self.initialize()
+            self._orig_pars = sc.dcp(self.pars) # Create a copy of the parameters, to restore after the run, in case they are dynamically modified
+
+        if verbose is None:
+            verbose = self['verbose']
+            
+        #icuの数を定義
+        self['n_beds_icu'] = icu_num
+
+        if reset_seed:
+            # Reset the RNG. If the simulation is newly created, then the RNG will be reset by sim.initialize() so the use case
+            # for resetting the seed here is if the simulation has been partially run, and changing the seed is required
+            self.set_seed()
+
+        # Check for AlreadyRun errors
+        errormsg = None
+        until = self.npts if until is None else self.day(until)
+        if until > self.npts:
+            errormsg = f'Requested to run until t={until} but the simulation end is t={self.npts}'
+        if self.t >= until: # NB. At the start, self.t is None so this check must occur after initialization
+            errormsg = f'Simulation is currently at t={self.t}, requested to run until t={until} which has already been reached'
+        if self.complete:
+            errormsg = 'Simulation is already complete (call sim.initialize() to re-run)'
+        if self.people.t not in [self.t, self.t-1]: # Depending on how the sim stopped, either of these states are possible
+            errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
+        if errormsg:
+            raise AlreadyRunError(errormsg)
+        
+
+        #icuの条件を満たしているかどうか
+        icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+        
+        # 死亡者数が5人超えるか，期間が終わるまで繰り返します．
+        while self.t < until and icu_judge:
+            
+            # Check if we were asked to stop
+            elapsed = T.toc(output=True)
+            if self['timelimit'] and elapsed > self['timelimit']:
+                sc.printv(f"Time limit ({self['timelimit']} s) exceeded; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+            elif self['stopping_func'] and self['stopping_func'](self):
+                sc.printv("Stopping function terminated the simulation; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+
+            # Print progress
+            if verbose:
+                simlabel = f'"{self.label}": ' if self.label else ''
+                string = f'  Running {simlabel}{self.datevec[self.t]} ({self.t:2.0f}/{self.pars["n_days"]}) ({elapsed:0.2f} s) '
+                if verbose >= 2:
+                    sc.heading(string)
+                elif verbose>0:
+                    if not (self.t % int(1.0/verbose)):
+                        sc.progressbar(self.t+1, self.npts, label=string, length=20, newline=True)
+
+            # Do the heavy lifting -- actually run the model!
+            self.step()
+            
+            #icu_maxの定義を更新
+            icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+            
+            #icu_judgeの条件が適合していたら完了とする
+            if not icu_judge :
+                self.complete = True
+            
+            # まだ終わっていないなら最良の地点か計算をする．
+            if not self.complete :
+                self.cul_point()
+                
+                #デバック
+                print(f'point={self.point},safety_point={self.safety_point}')
+                
+                if self.point < self.safety_point:
+                    
+                    self.safety_point = self.point
+                    self.save('most-safety-point.sim')
+                
+
+        # If simulation reached the end, finalize the results
+        if self.complete:
+            self.finalize(verbose=verbose, restore_pars=restore_pars)
+            sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
+            self.finish_time = self.t
+            
+        return self
+    
 
 
 

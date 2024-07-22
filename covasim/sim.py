@@ -873,10 +873,30 @@ class Sim(cvb.BaseSim):
         return self
     
     
+    #年齢ごとの感染者を求める関数
+    def cul_critical_per_age(self,min=0,max=sys.maxsize) :
+        if max < min :
+            print("最小値が最大値より大きくなっています")
+            return 0
+        return sum((self.people.infectious) & (self.people.age >= min) & (self.people.age <= max) )
+    
     #リスク顕在化ポイントを計算する関数
     def cul_point(self) :
+        #重症者予想値を求める
+        critical_pre_list = [
+        #self.cul_critical_per_age(min=0,max=9) * 0.00003,
+        #self.cul_critical_per_age(min=10,max=19) * 0.00008,
+        #self.cul_critical_per_age(min=20,max=29)* 0.00036,
+        #self.cul_critical_per_age(min=0,max=39)* 0.00104,
+        self.cul_critical_per_age(min=0,max=49)* 0.00216,
+        self.cul_critical_per_age(min=50,max=59)* 0.00933,
+        self.cul_critical_per_age(min=60,max=69)* 0.03639,
+        self.cul_critical_per_age(min=60,max=79)* 0.08923,
+        self.cul_critical_per_age(min=80)* 0.17420
+        ]
+        pre_critical = sum(critical_pre_list)
         #ポイントは単純に重症者数ー現在の時刻にする．
-        self.point = (self.people.count('critical')+(sum(self.people.infectious)*0.1)) - (self['n_beds_icu'] / float(self['n_days'])) *  self.t
+        self.point = pre_critical - (self['n_beds_icu'] / float(self['n_days'])) *  self.t
         return self
     
     #シミュレーションしてリスクが顕在化しない最もよい地点だったら保存する．
@@ -959,7 +979,7 @@ class Sim(cvb.BaseSim):
                 self.cul_point()
                 
                 #デバック
-                print(f'point={self.point},safety_point={self.safety_point}')
+                #print(f'point={self.point},safety_point={self.safety_point}')
                 
                 if self.point < self.safety_point:
                     

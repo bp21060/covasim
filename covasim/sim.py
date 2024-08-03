@@ -810,7 +810,7 @@ class Sim(cvb.BaseSim):
     
     #追加関数
     #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
-    def condition_end_run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None, moredata=False):
+    def condition_end_run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None):
         
         # 追加しました
         print("時間経過or条件適合までをします")
@@ -877,57 +877,6 @@ class Sim(cvb.BaseSim):
 
             # Do the heavy lifting -- actually run the model!
             self.step()
-            
-            #変数追加収集モード
-            if moredata:
-                self.results['80_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
-                self.results['80_infectious'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
-                self.results['80_symptomtic'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
-                self.results['80_severe'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
-                self.results['80_critical'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
-                self.results['70_80_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 70) & (self.people.age < 80))
-                self.results['70_80_infectious'][self.t] =  sum((self.people.exposed) & (self.people.age >= 70) & (self.people.age < 80))
-                self.results['70_80_symptomtic'][self.t] =  sum((self.people.exposed) & (self.people.age >= 70) & (self.people.age < 80))
-                self.results['70_80_severe'][self.t] =  sum((self.people.exposed) & (self.people.age >= 70) & (self.people.age < 80))
-                self.results['70_80_critical'][self.t] =  sum((self.people.exposed) & (self.people.age >= 70) & (self.people.age < 80))
-                self.results['60_70_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 60) & (self.people.age < 70))
-                self.results['60_70_infectious'][self.t] =  sum((self.people.exposed) & (self.people.age >= 60) & (self.people.age < 70))
-                self.results['60_70_symptomtic'][self.t] =  sum((self.people.exposed) & (self.people.age >= 60) & (self.people.age < 70))
-                self.results['60_70_severe'][self.t] =  sum((self.people.exposed) & (self.people.age >= 60) & (self.people.age < 70))
-                self.results['60_70_critical'][self.t] =  sum((self.people.exposed) & (self.people.age >= 60) & (self.people.age < 70))
-                self.results['50_60_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 50) & (self.people.age < 60))
-                self.results['50_60_infectious'][self.t] =  sum((self.people.exposed) & (self.people.age >= 50) & (self.people.age < 60))
-                self.results['50_60_symptomtic'][self.t] =  sum((self.people.exposed) & (self.people.age >= 50) & (self.people.age < 60))
-                self.results['50_60_severe'][self.t] =  sum((self.people.exposed) & (self.people.age >= 50) & (self.people.age < 60))
-                self.results['50_60_critical'][self.t] =  sum((self.people.exposed) & (self.people.age >= 50) & (self.people.age < 60))
-                # 10-20歳
-                self.results['10_20_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 10) & (self.people.age < 20))
-                self.results['10_20_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 10) & (self.people.age < 20))
-                self.results['10_20_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 10) & (self.people.age < 20))
-                self.results['10_20_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 10) & (self.people.age < 20))
-                self.results['10_20_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 10) & (self.people.age < 20))
-                
-                # 20-30歳
-                self.results['20_30_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 20) & (self.people.age < 30))
-                self.results['20_30_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 20) & (self.people.age < 30))
-                self.results['20_30_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 20) & (self.people.age < 30))
-                self.results['20_30_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 20) & (self.people.age < 30))
-                self.results['20_30_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 20) & (self.people.age < 30))
-                
-                # 30-40歳
-                self.results['30_40_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 30) & (self.people.age < 40))
-                self.results['30_40_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 30) & (self.people.age < 40))
-                self.results['30_40_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 30) & (self.people.age < 40))
-                self.results['30_40_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 30) & (self.people.age < 40))
-                self.results['30_40_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 30) & (self.people.age < 40))
-                
-                # 40-50歳
-                self.results['40_50_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 40) & (self.people.age < 50))
-                self.results['40_50_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 40) & (self.people.age < 50))
-                self.results['40_50_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 40) & (self.people.age < 50))
-                self.results['40_50_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 40) & (self.people.age < 50))
-                self.results['40_50_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 40) & (self.people.age < 50))
-
             
             #icu_maxの定義を更新
             icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True

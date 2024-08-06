@@ -120,6 +120,8 @@ class People(cvb.BasePeople):
 
     def init_flows(self):
         ''' Initialize flows to be zero '''
+        
+        
         self.flows = {key:0 for key in cvd.new_result_flows}
         self.flows_variant = {}
         for key in cvd.new_result_flows_by_variant:

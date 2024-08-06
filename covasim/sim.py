@@ -18,6 +18,7 @@ from . import immunity as cvimm
 from . import analysis as cva
 from .settings import options as cvo
 import sys
+import copy
 
 # Almost everything in this file is contained in the Sim class
 __all__ = ['Sim', 'diff_sims', 'demo', 'AlreadyRunError']
@@ -357,14 +358,23 @@ class Sim(cvb.BaseSim):
         #追加部分
         self.results['elderly_infectious'] = init_res('Population of elderly people infectious')
         
-        age_ranges = ['10_20', '20_30', '30_40', '40_50', '50_60', '60_70', '70_80', '80']
+        age_ranges = ['0_10','10_20', '20_30', '30_40', '40_50', '50_60', '60_70', '70_80', '80']
         for age_range in age_ranges :
             self.results[f'n_{age_range}_exposed'] = init_res(f'Population of {age_range}_exposed')
             self.results[f'n_{age_range}_infectious'] = init_res(f'Population of {age_range}_infectious')
             self.results[f'n_{age_range}_symptomatic'] = init_res(f'Population of {age_range}_symptomatic')
             self.results[f'n_{age_range}_severe'] = init_res(f'Population of {age_range}_severe')
             self.results[f'n_{age_range}_critical'] = init_res(f'Population of {age_range}_critical')
-                        
+            self.results[f'new_{age_range}_exposed'] = init_res(f'Population of new {age_range}_exposed')
+            self.results[f'new_{age_range}_infectious'] = init_res(f'Population of new {age_range}_infectious')
+            self.results[f'new_{age_range}_symptomatic'] = init_res(f'Population of new {age_range}_symptomatic')
+            self.results[f'new_{age_range}_severe'] = init_res(f'Population of new {age_range}_severe')
+            self.results[f'new_{age_range}_critical'] = init_res(f'Population of new {age_range}_critical')
+            self.results[f'cum_{age_range}_exposed'] = init_res(f'Cumulative Population of {age_range}_exposed')
+            self.results[f'cum_{age_range}_infectious'] = init_res(f'Cumulative Population of {age_range}_infectious')
+            self.results[f'cum_{age_range}_symptomatic'] = init_res(f'Cumulative Population of {age_range}_symptomatic')
+            self.results[f'cum_{age_range}_severe'] = init_res(f'Cumulative Population of {age_range}_severe')
+            self.results[f'cum_{age_range}_critical'] = init_res(f'Cumulative Population of {age_range}_critical')            
 
         return
 
@@ -800,8 +810,6 @@ class Sim(cvb.BaseSim):
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()
-        
-        
 
         if not self.initialized:
             self.initialize()
@@ -863,17 +871,78 @@ class Sim(cvb.BaseSim):
             
             #変数追加収集モード
             if more_data:
-                for i in range (1,8) :
-                    self.results[f'n_{i * 10}_{(i+1) * 10}_exposed'][self.t]  = sum((self.people.exposed) & (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10)))
-                    self.results[f'n_{i * 10}_{(i+1) * 10}_infectious'][self.t]  = sum((self.people.infectious) & (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10)))
-                    self.results[f'n_{i * 10}_{(i+1) * 10}_symptomatic'][self.t]  = sum((self.people.symptomatic) & (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10)))
-                    self.results[f'n_{i * 10}_{(i+1) * 10}_severe'][self.t]  = sum((self.people.severe) & (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10)))
-                    self.results[f'n_{i * 10}_{(i+1) * 10}_critical'][self.t]  = sum((self.people.critical) & (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10)))
+                #tの大きさがすでに更新されているのでもとに戻す
+                self.t = self.t - 1 
+                if self.t == 0 :
+                    num_people = len(self.people.exposed)
+                    # Falseがnum_peopleの数と同等の要素数ある配列を作成
+                    self.last_exposed = np.full(num_people, False, dtype=bool)
+                    self.last_infectious = np.full(num_people, False, dtype=bool)
+                    self.last_symptomatic = np.full(num_people, False, dtype=bool)
+                    self.last_severe = np.full(num_people, False, dtype=bool)
+                    self.last_critical = np.full(num_people, False, dtype=bool)
+                
+                #新しくその病態になった人を計測
+                new_exposed = self.people.exposed & ~(self.last_exposed)
+                new_infectious = self.people.infectious & ~(self.last_infectious)
+                new_symptomatic = self.people.symptomatic & ~(self.last_symptomatic)
+                new_severe = self.people.severe & ~(self.last_severe)
+                new_critical = self.people.critical & ~(self.last_critical)
+                
+                #デバック
+                print(sum(new_exposed))
+                
+                for i in range (0,8) :
+                    age_mask = (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10))
+                    #n
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_exposed'][self.t]  = sum((self.people.exposed) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_infectious'][self.t]  = sum((self.people.infectious) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_symptomatic'][self.t]  = sum((self.people.symptomatic) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_severe'][self.t]  = sum((self.people.severe) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_critical'][self.t]  = sum((self.people.critical) & age_mask)
+                    #new
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_exposed'][self.t] = sum(new_exposed & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_infectious'][self.t] = sum(new_infectious & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_symptomatic'][self.t] = sum(new_symptomatic & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_severe'][self.t] = sum(new_severe & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_critical'][self.t] = sum(new_critical & age_mask)
+                    #cum
+                    for condition in ['exposed', 'infectious', 'symptomatic', 'severe', 'critical']:
+                        if self.t == 0:
+                            self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t] = self.results[f'new_{i * 10}_{(i+1) * 10}_{condition}'][self.t]
+                        else:
+                            self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t] = self.results[f'new_{i * 10}_{(i+1) * 10}_{condition}'][self.t] + self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t - 1]
+
+                    
                 self.results['n_80_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
                 self.results['n_80_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 80))
                 self.results['n_80_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 80))
                 self.results['n_80_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 80))
                 self.results['n_80_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 80))
+                
+                self.results['new_80_exposed'][self.t] = sum(new_exposed &  (self.people.age >= 80))
+                self.results['new_80_infectious'][self.t] = sum(new_infectious &  (self.people.age >= 80))
+                self.results['new_80_symptomatic'][self.t] = sum(new_symptomatic &  (self.people.age >= 80))
+                self.results['new_80_severe'][self.t] = sum(new_severe &  (self.people.age >= 80))
+                self.results['new_80_critical'][self.t] = sum(new_critical &  (self.people.age >= 80))
+                
+                for condition in ['exposed', 'infectious', 'symptomatic', 'severe', 'critical']:
+                    if self.t == 0:
+                        self.results[f'cum_80_{condition}'][self.t] = self.results[f'new_80_{condition}'][self.t]
+                    else:
+                        self.results[f'cum_80_{condition}'][self.t] = self.results[f'new_80_{condition}'][self.t] + self.results[f'cum_80_{condition}'][self.t - 1]
+
+                
+                #病態リストの更新
+                self.last_exposed = copy.deepcopy(self.people.exposed)
+                self.last_infectious = copy.deepcopy(self.people.infectious)
+                self.last_symptomatic = copy.deepcopy(self.people.symptomatic)
+                self.last_severe = copy.deepcopy(self.people.severe)
+                self.last_critical = copy.deepcopy(self.people.critical)
+                
+                #tを元に戻す
+                self.t = self.t + 1 
+            
             
             #icu_maxの定義を更新
             icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
@@ -887,7 +956,6 @@ class Sim(cvb.BaseSim):
             self.finalize(verbose=verbose, restore_pars=restore_pars)
             sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
             self.finish_time = self.t
-            
         return self
     
     

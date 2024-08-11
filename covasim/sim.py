@@ -376,7 +376,13 @@ class Sim(cvb.BaseSim):
             self.results[f'cum_{age_range}_severe'] = init_res(f'Cumulative Population of {age_range}_severe')
             self.results[f'cum_{age_range}_critical'] = init_res(f'Cumulative Population of {age_range}_critical')            
 
+        for layer in ['default_contact', 'household', 'school', 'workplace', 'community']:
+            self.results[f'new_{layer}_infect']= init_res(f'Population of new infection in {layer}')
+            self.results[f'cum_{layer}_infect']=  init_res(f'Cumulative Population of infection in {layer}')
+
         return
+    
+        
 
 
     def load_population(self, popfile=None, init_people=True, **kwargs):
@@ -940,6 +946,25 @@ class Sim(cvb.BaseSim):
                 self.last_severe = copy.deepcopy(self.people.severe)
                 self.last_critical = copy.deepcopy(self.people.critical)
                 
+                #感染レイヤー計測
+                layer_counts = self.people.count_infections_by_layer()
+                self.results['cum_default_contact_infect'][self.t] = layer_counts['a']
+                self.results['cum_household_infect'][self.t] = layer_counts['h']
+                self.results['cum_school_infect'][self.t] = layer_counts['s']
+                self.results['cum_workplace_infect'][self.t] = layer_counts['w']
+                self.results['cum_community_infect'][self.t] = layer_counts['c']
+                
+                #新規感染の抽出
+                #cum
+                for layer in ['default_contact', 'household', 'school', 'workplace', 'community']:
+                    if self.t == 0:
+                        self.results[f'new_{layer}_infect'][self.t] = self.results[f'cum_{layer}_infect'][self.t]
+                    else:
+                        self.results[f'new_{layer}_infect'][self.t] =  self.results[f'cum_{layer}_infect'][self.t] -  self.results[f'cum_{layer}_infect'][self.t - 1]
+
+                
+                
+                
                 #tを元に戻す
                 self.t = self.t + 1 
             
@@ -957,7 +982,7 @@ class Sim(cvb.BaseSim):
             sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
             self.finish_time = self.t
         return self
-    
+     
     
     #年齢ごとの感染者を求める関数
     def cul_critical_per_age(self,min=0,max=sys.maxsize) :

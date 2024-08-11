@@ -17,6 +17,8 @@ from . import interventions as cvi
 from . import immunity as cvimm
 from . import analysis as cva
 from .settings import options as cvo
+import sys
+import copy
 
 # Almost everything in this file is contained in the Sim class
 __all__ = ['Sim', 'diff_sims', 'demo', 'AlreadyRunError']
@@ -67,6 +69,11 @@ class Sim(cvb.BaseSim):
         self._default_ver  = version  # Default version of parameters used
         self._legacy_trans = None     # Whether to use the legacy transmission calculation method (slower; for reproducing earlier results)
         self._orig_pars    = None     # Store original parameters to optionally restore at the end of the simulation
+        
+        #追加部分
+        self.finish_time = None #シミュレーション終了時刻
+        self.safety_point = sys.maxsize #最も安全な地点のリスク顕在化ポイント
+        self.point = None #現時点でのポイント
 
         # Make default parameters (using values from parameters.py)
         default_pars = cvpar.make_pars(version=version) # Start with default pars
@@ -348,7 +355,34 @@ class Sim(cvb.BaseSim):
         self.results['t']    = self.tvec
         self.results_ready   = False
 
+        #追加部分
+        self.results['elderly_infectious'] = init_res('Population of elderly people infectious')
+        
+        age_ranges = ['0_10','10_20', '20_30', '30_40', '40_50', '50_60', '60_70', '70_80', '80']
+        for age_range in age_ranges :
+            self.results[f'n_{age_range}_exposed'] = init_res(f'Population of {age_range}_exposed')
+            self.results[f'n_{age_range}_infectious'] = init_res(f'Population of {age_range}_infectious')
+            self.results[f'n_{age_range}_symptomatic'] = init_res(f'Population of {age_range}_symptomatic')
+            self.results[f'n_{age_range}_severe'] = init_res(f'Population of {age_range}_severe')
+            self.results[f'n_{age_range}_critical'] = init_res(f'Population of {age_range}_critical')
+            self.results[f'new_{age_range}_exposed'] = init_res(f'Population of new {age_range}_exposed')
+            self.results[f'new_{age_range}_infectious'] = init_res(f'Population of new {age_range}_infectious')
+            self.results[f'new_{age_range}_symptomatic'] = init_res(f'Population of new {age_range}_symptomatic')
+            self.results[f'new_{age_range}_severe'] = init_res(f'Population of new {age_range}_severe')
+            self.results[f'new_{age_range}_critical'] = init_res(f'Population of new {age_range}_critical')
+            self.results[f'cum_{age_range}_exposed'] = init_res(f'Cumulative Population of {age_range}_exposed')
+            self.results[f'cum_{age_range}_infectious'] = init_res(f'Cumulative Population of {age_range}_infectious')
+            self.results[f'cum_{age_range}_symptomatic'] = init_res(f'Cumulative Population of {age_range}_symptomatic')
+            self.results[f'cum_{age_range}_severe'] = init_res(f'Cumulative Population of {age_range}_severe')
+            self.results[f'cum_{age_range}_critical'] = init_res(f'Cumulative Population of {age_range}_critical')            
+
+        for layer in ['default_contact', 'household', 'school', 'workplace', 'community']:
+            self.results[f'new_{layer}_infect']= init_res(f'Population of new infection in {layer}')
+            self.results[f'cum_{layer}_infect']=  init_res(f'Cumulative Population of infection in {layer}')
+
         return
+    
+        
 
 
     def load_population(self, popfile=None, init_people=True, **kwargs):
@@ -672,7 +706,14 @@ class Sim(cvb.BaseSim):
         self.results['pop_nabs'][t]            = np.sum(people.nab[inds_alive[cvu.true(people.nab[inds_alive])]])/len(inds_alive)
         self.results['pop_protection'][t]      = np.nanmean(people.sus_imm)
         self.results['pop_symp_protection'][t] = np.nanmean(people.symp_imm)
-
+        
+        #追加部分
+        #テスト
+        #print(self.people.infection_log())
+        
+        self.results['elderly_infectious'][t] =  sum((self.people.infectious) & (self.people.age >= 65))
+        
+        
         # Apply analyzers -- same syntax as interventions
         for i,analyzer in enumerate(self['analyzers']):
             analyzer(self)
@@ -699,6 +740,9 @@ class Sim(cvb.BaseSim):
         Returns:
             A pointer to the sim object (with results modified in-place)
         '''
+        
+        # 追加しました
+        print("追加しました．")
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()
@@ -728,6 +772,8 @@ class Sim(cvb.BaseSim):
             errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
         if errormsg:
             raise AlreadyRunError(errormsg)
+            
+        
 
         # Main simulation loop
         while self.t < until:
@@ -753,12 +799,312 @@ class Sim(cvb.BaseSim):
 
             # Do the heavy lifting -- actually run the model!
             self.step()
+                
 
         # If simulation reached the end, finalize the results
         if self.complete:
             self.finalize(verbose=verbose, restore_pars=restore_pars)
             sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
         return self
+    
+    #追加関数
+    #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
+    def condition_end_run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False):
+        
+        # 追加しました
+        print("時間経過or条件適合までをします")
+
+        # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
+        T = sc.timer()
+
+        if not self.initialized:
+            self.initialize()
+            self._orig_pars = sc.dcp(self.pars) # Create a copy of the parameters, to restore after the run, in case they are dynamically modified
+
+        if verbose is None:
+            verbose = self['verbose']
+        
+        #icuの数を定義
+        self['n_beds_icu'] = icu_num
+
+        if reset_seed:
+            # Reset the RNG. If the simulation is newly created, then the RNG will be reset by sim.initialize() so the use case
+            # for resetting the seed here is if the simulation has been partially run, and changing the seed is required
+            self.set_seed()
+
+        # Check for AlreadyRun errors
+        errormsg = None
+        until = self.npts if until is None else self.day(until)
+        if until > self.npts:
+            errormsg = f'Requested to run until t={until} but the simulation end is t={self.npts}'
+        if self.t >= until: # NB. At the start, self.t is None so this check must occur after initialization
+            errormsg = f'Simulation is currently at t={self.t}, requested to run until t={until} which has already been reached'
+        if self.complete:
+            errormsg = 'Simulation is already complete (call sim.initialize() to re-run)'
+        if self.people.t not in [self.t, self.t-1]: # Depending on how the sim stopped, either of these states are possible
+            errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
+        if errormsg:
+            raise AlreadyRunError(errormsg)
+        
+
+        #icuの条件を満たしているかどうか
+        icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+        
+        # 死亡者数が5人超えるか，期間が終わるまで繰り返します．
+        while self.t < until and icu_judge:
+            
+            # Check if we were asked to stop
+            elapsed = T.toc(output=True)
+            if self['timelimit'] and elapsed > self['timelimit']:
+                sc.printv(f"Time limit ({self['timelimit']} s) exceeded; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+            elif self['stopping_func'] and self['stopping_func'](self):
+                sc.printv("Stopping function terminated the simulation; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+
+            # Print progress
+            if verbose:
+                simlabel = f'"{self.label}": ' if self.label else ''
+                string = f'  Running {simlabel}{self.datevec[self.t]} ({self.t:2.0f}/{self.pars["n_days"]}) ({elapsed:0.2f} s) '
+                if verbose >= 2:
+                    sc.heading(string)
+                elif verbose>0:
+                    if not (self.t % int(1.0/verbose)):
+                        sc.progressbar(self.t+1, self.npts, label=string, length=20, newline=True)
+
+            # Do the heavy lifting -- actually run the model!
+            self.step()
+            
+            #変数追加収集モード
+            if more_data:
+                #tの大きさがすでに更新されているのでもとに戻す
+                self.t = self.t - 1 
+                if self.t == 0 :
+                    num_people = len(self.people.exposed)
+                    # Falseがnum_peopleの数と同等の要素数ある配列を作成
+                    self.last_exposed = np.full(num_people, False, dtype=bool)
+                    self.last_infectious = np.full(num_people, False, dtype=bool)
+                    self.last_symptomatic = np.full(num_people, False, dtype=bool)
+                    self.last_severe = np.full(num_people, False, dtype=bool)
+                    self.last_critical = np.full(num_people, False, dtype=bool)
+                
+                #新しくその病態になった人を計測
+                new_exposed = self.people.exposed & ~(self.last_exposed)
+                new_infectious = self.people.infectious & ~(self.last_infectious)
+                new_symptomatic = self.people.symptomatic & ~(self.last_symptomatic)
+                new_severe = self.people.severe & ~(self.last_severe)
+                new_critical = self.people.critical & ~(self.last_critical)
+                
+                #デバック
+                print(sum(new_exposed))
+                
+                for i in range (0,8) :
+                    age_mask = (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10))
+                    #n
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_exposed'][self.t]  = sum((self.people.exposed) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_infectious'][self.t]  = sum((self.people.infectious) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_symptomatic'][self.t]  = sum((self.people.symptomatic) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_severe'][self.t]  = sum((self.people.severe) & age_mask)
+                    self.results[f'n_{i * 10}_{(i+1) * 10}_critical'][self.t]  = sum((self.people.critical) & age_mask)
+                    #new
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_exposed'][self.t] = sum(new_exposed & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_infectious'][self.t] = sum(new_infectious & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_symptomatic'][self.t] = sum(new_symptomatic & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_severe'][self.t] = sum(new_severe & age_mask)
+                    self.results[f'new_{i * 10}_{(i+1) * 10}_critical'][self.t] = sum(new_critical & age_mask)
+                    #cum
+                    for condition in ['exposed', 'infectious', 'symptomatic', 'severe', 'critical']:
+                        if self.t == 0:
+                            self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t] = self.results[f'new_{i * 10}_{(i+1) * 10}_{condition}'][self.t]
+                        else:
+                            self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t] = self.results[f'new_{i * 10}_{(i+1) * 10}_{condition}'][self.t] + self.results[f'cum_{i * 10}_{(i+1) * 10}_{condition}'][self.t - 1]
+
+                    
+                self.results['n_80_exposed'][self.t] =  sum((self.people.exposed) & (self.people.age >= 80))
+                self.results['n_80_infectious'][self.t] =  sum((self.people.infectious) & (self.people.age >= 80))
+                self.results['n_80_symptomatic'][self.t] =  sum((self.people.symptomatic) & (self.people.age >= 80))
+                self.results['n_80_severe'][self.t] =  sum((self.people.severe) & (self.people.age >= 80))
+                self.results['n_80_critical'][self.t] =  sum((self.people.critical) & (self.people.age >= 80))
+                
+                self.results['new_80_exposed'][self.t] = sum(new_exposed &  (self.people.age >= 80))
+                self.results['new_80_infectious'][self.t] = sum(new_infectious &  (self.people.age >= 80))
+                self.results['new_80_symptomatic'][self.t] = sum(new_symptomatic &  (self.people.age >= 80))
+                self.results['new_80_severe'][self.t] = sum(new_severe &  (self.people.age >= 80))
+                self.results['new_80_critical'][self.t] = sum(new_critical &  (self.people.age >= 80))
+                
+                for condition in ['exposed', 'infectious', 'symptomatic', 'severe', 'critical']:
+                    if self.t == 0:
+                        self.results[f'cum_80_{condition}'][self.t] = self.results[f'new_80_{condition}'][self.t]
+                    else:
+                        self.results[f'cum_80_{condition}'][self.t] = self.results[f'new_80_{condition}'][self.t] + self.results[f'cum_80_{condition}'][self.t - 1]
+
+                
+                #病態リストの更新
+                self.last_exposed = copy.deepcopy(self.people.exposed)
+                self.last_infectious = copy.deepcopy(self.people.infectious)
+                self.last_symptomatic = copy.deepcopy(self.people.symptomatic)
+                self.last_severe = copy.deepcopy(self.people.severe)
+                self.last_critical = copy.deepcopy(self.people.critical)
+                
+                #感染レイヤー計測
+                layer_counts = self.people.count_infections_by_layer()
+                self.results['cum_default_contact_infect'][self.t] = layer_counts['a']
+                self.results['cum_household_infect'][self.t] = layer_counts['h']
+                self.results['cum_school_infect'][self.t] = layer_counts['s']
+                self.results['cum_workplace_infect'][self.t] = layer_counts['w']
+                self.results['cum_community_infect'][self.t] = layer_counts['c']
+                
+                #新規感染の抽出
+                #cum
+                for layer in ['default_contact', 'household', 'school', 'workplace', 'community']:
+                    if self.t == 0:
+                        self.results[f'new_{layer}_infect'][self.t] = self.results[f'cum_{layer}_infect'][self.t]
+                    else:
+                        self.results[f'new_{layer}_infect'][self.t] =  self.results[f'cum_{layer}_infect'][self.t] -  self.results[f'cum_{layer}_infect'][self.t - 1]
+
+                
+                
+                
+                #tを元に戻す
+                self.t = self.t + 1 
+            
+            
+            #icu_maxの定義を更新
+            icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+            
+            #icu_judgeの条件が適合していたら完了とする
+            if not icu_judge :
+                self.complete = True
+
+        # If simulation reached the end, finalize the results
+        if self.complete:
+            self.finalize(verbose=verbose, restore_pars=restore_pars)
+            sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
+            self.finish_time = self.t
+        return self
+     
+    
+    #年齢ごとの感染者を求める関数
+    def cul_critical_per_age(self,min=0,max=sys.maxsize) :
+        if max < min :
+            print("最小値が最大値より大きくなっています")
+            return 0
+        return sum((self.people.exposed) & (self.people.age >= min) & (self.people.age <= max) )
+    
+    #リスク顕在化ポイントを計算する関数
+    def cul_point(self) :
+        #重症者予想値を求める
+        critical_pre_list = [
+        #self.cul_critical_per_age(min=0,max=9) * 0.00003,
+        #self.cul_critical_per_age(min=10,max=19) * 0.00008,
+        #self.cul_critical_per_age(min=20,max=29)* 0.00036,
+        #self.cul_critical_per_age(min=0,max=39)* 0.00104,
+        self.cul_critical_per_age(min=0,max=49)* 0.00216,
+        self.cul_critical_per_age(min=50,max=59)* 0.00933,
+        self.cul_critical_per_age(min=60,max=69)* 0.03639,
+        self.cul_critical_per_age(min=60,max=79)* 0.08923,
+        self.cul_critical_per_age(min=80)* 0.17420
+        ]
+        #ポイントは重症者数と重症者予想値
+        return  self.people.count('critical')+sum(critical_pre_list)
+    
+    #シミュレーションしてリスクが顕在化しない最もよい地点だったら保存する．
+    def save_most_safety_point(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None):
+        
+        # 追加しました
+        print("リスクが顕在化しないパターンの生成を行います．")
+
+        # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
+        T = sc.timer()
+        
+
+        if not self.initialized:
+            self.initialize()
+            self._orig_pars = sc.dcp(self.pars) # Create a copy of the parameters, to restore after the run, in case they are dynamically modified
+
+        if verbose is None:
+            verbose = self['verbose']
+            
+        #icuの数を定義
+        self['n_beds_icu'] = icu_num
+
+        if reset_seed:
+            # Reset the RNG. If the simulation is newly created, then the RNG will be reset by sim.initialize() so the use case
+            # for resetting the seed here is if the simulation has been partially run, and changing the seed is required
+            self.set_seed()
+
+        # Check for AlreadyRun errors
+        errormsg = None
+        until = self.npts if until is None else self.day(until)
+        if until > self.npts:
+            errormsg = f'Requested to run until t={until} but the simulation end is t={self.npts}'
+        if self.t >= until: # NB. At the start, self.t is None so this check must occur after initialization
+            errormsg = f'Simulation is currently at t={self.t}, requested to run until t={until} which has already been reached'
+        if self.complete:
+            errormsg = 'Simulation is already complete (call sim.initialize() to re-run)'
+        if self.people.t not in [self.t, self.t-1]: # Depending on how the sim stopped, either of these states are possible
+            errormsg = f'The simulation has been run independently from the people (t={self.t}, people.t={self.people.t}): if this is intentional, manually set sim.people.t = sim.t. Remember to save the people object before running the sim.'
+        if errormsg:
+            raise AlreadyRunError(errormsg)
+        
+
+        #icuの条件を満たしているかどうか
+        icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+        
+        # 死亡者数が5人超えるか，期間が終わるまで繰り返します．
+        while self.t < until and icu_judge:
+            
+            # Check if we were asked to stop
+            elapsed = T.toc(output=True)
+            if self['timelimit'] and elapsed > self['timelimit']:
+                sc.printv(f"Time limit ({self['timelimit']} s) exceeded; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+            elif self['stopping_func'] and self['stopping_func'](self):
+                sc.printv("Stopping function terminated the simulation; call sim.finalize() to compute results if desired", 1, verbose)
+                return
+
+            # Print progress
+            if verbose:
+                simlabel = f'"{self.label}": ' if self.label else ''
+                string = f'  Running {simlabel}{self.datevec[self.t]} ({self.t:2.0f}/{self.pars["n_days"]}) ({elapsed:0.2f} s) '
+                if verbose >= 2:
+                    sc.heading(string)
+                elif verbose>0:
+                    if not (self.t % int(1.0/verbose)):
+                        sc.progressbar(self.t+1, self.npts, label=string, length=20, newline=True)
+
+            # Do the heavy lifting -- actually run the model!
+            self.step()
+            
+            #icu_maxの定義を更新
+            icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+            
+            #icu_judgeの条件が適合していたら完了とする
+            if not icu_judge :
+                self.complete = True
+            
+            # まだ終わっていないなら最良の地点か計算をする．
+            if not self.complete :
+                self.cul_point()
+                
+                #デバック
+                #print(f'point={self.point},safety_point={self.safety_point}')
+                
+                if self.point < self.safety_point:
+                    
+                    self.safety_point = self.point
+                    self.save('most-safety-point.sim')
+                
+
+        # If simulation reached the end, finalize the results
+        if self.complete:
+            self.finalize(verbose=verbose, restore_pars=restore_pars)
+            sc.printv(f'Run finished after {elapsed:0.2f} s.\n', 1, verbose)
+            self.finish_time = self.t
+            
+        return self
+    
+
 
 
     def finalize(self, verbose=None, restore_pars=True):

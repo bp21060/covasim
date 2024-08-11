@@ -431,6 +431,9 @@ class People(cvb.BasePeople):
             self.check_recovery(inds=inds, filter_inds=None) # Set recovered
 
         return
+    
+    
+
 
 
 
@@ -640,6 +643,32 @@ class People(cvb.BasePeople):
         for ind in inds:
             self._pending_quarantine[start_date].append((ind, start_date + period))
         return
+    
+    
+    #追加
+    #各レイヤーでの感染をカウントする関数
+    def count_infections_by_layer(self):
+        """
+        Count the number of infections by each contact layer.
+    
+        Returns:
+            dict: Dictionary with layer names as keys and infection counts as values.
+        """
+        # Initialize a dictionary to hold the counts for each layer
+        layer_counts = {}
+        layer_counts['a'] = 0
+        layer_counts['h'] = 0
+        layer_counts['s'] = 0
+        layer_counts['w'] = 0
+        layer_counts['c'] = 0
+        # Iterate over the infection log to count infections by layer
+        for log_entry in self.infection_log:
+            layer = log_entry['layer']
+            if layer not in layer_counts:
+                layer_counts[layer] = 0
+            layer_counts[layer] += 1
+    
+        return layer_counts
 
 
     #%% Analysis methods

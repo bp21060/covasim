@@ -812,7 +812,7 @@ class Sim(cvb.BaseSim):
     def condition_end_run(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False):
         
         # 追加しました
-        print("時間経過or条件適合までをします")
+        #print("時間経過or条件適合までをします")
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()
@@ -896,7 +896,7 @@ class Sim(cvb.BaseSim):
                 new_critical = self.people.critical & ~(self.last_critical)
                 
                 #デバック
-                print(sum(new_exposed))
+                #print(sum(new_exposed))
                 
                 for i in range (0,8) :
                     age_mask = (self.people.age >= (i * 10)) & (self.people.age < ((i + 1) * 10))

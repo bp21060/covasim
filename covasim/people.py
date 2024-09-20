@@ -433,9 +433,177 @@ class People(cvb.BasePeople):
         return
     
     
+    def infect_block(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0,threshold=20):
+        '''
+        Infect people and determine their eventual outcomes.
+
+            * Every infected person can infect other people, regardless of whether they develop symptoms
+            * Infected people that develop symptoms are disaggregated into mild vs. severe (=requires hospitalization) vs. critical (=requires ICU)
+            * Every asymptomatic, mildly symptomatic, and severely symptomatic person recovers
+            * Critical cases either recover or die
+            * If the simulation is being run with waning, this method also sets/updates agents' neutralizing antibody levels
+
+        Method also deduplicates input arrays in case one agent is infected many times
+        and stores who infected whom in infection_log list.
+
+        Args:
+            inds     (array): array of people to infect
+            hosp_max (bool):  whether or not there is an acute bed available for this person
+            icu_max  (bool):  whether or not there is an ICU bed available for this person
+            source   (array): source indices of the people who transmitted this infection (None if an importation or seed infection)
+            layer    (str):   contact layer this infection was transmitted on
+            variant  (int):   the variant people are being infected by
+
+        Returns:
+            count (int): number of people infected
+        '''
+
+        # If no infections, short-circuit
+        if len(inds) == 0:
+            return inds
+
+        # Remove duplicates
+        inds, unique = np.unique(inds, return_index=True)
+        if source is not None:
+            source = source[unique]
 
 
+        # Keep only susceptibles
+        keep = self.susceptible[inds] # Unique indices in inds and source that are also susceptible
+        inds = inds[keep]
+        if source is not None:
+            source = source[keep]
+            
+            
 
+        # Deal with variant parameters
+        variant_keys = ['rel_symp_prob', 'rel_severe_prob', 'rel_crit_prob', 'rel_death_prob']
+        infect_pars = {k:self.pars[k] for k in variant_keys}
+        variant_label = self.pars['variant_map'][variant]
+        if variant:
+            for k in variant_keys:
+                infect_pars[k] *= self.pars['variant_pars'][variant_label][k]
+
+
+        durpars      = self.pars['dur']
+
+        # Retrieve those with a breakthrough infection (defined nabs)
+        breakthrough_inds = inds[cvu.true(self.peak_nab[inds])]
+        if len(breakthrough_inds):
+            no_prior_breakthrough = (self.n_breakthroughs[breakthrough_inds] == 0) # We only adjust transmissibility for the first breakthrough
+            new_breakthrough_inds = breakthrough_inds[no_prior_breakthrough]
+            self.rel_trans[new_breakthrough_inds] *= self.pars['trans_redux']
+            
+            
+        # 現在の感染者数を取得
+        current_exposed_count = self.count('exposed')
+        # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
+        if current_exposed_count + len(inds) > threshold:
+            allowed_infections = threshold - current_exposed_count
+            if allowed_infections <= 0:
+                print("感染者数が上限に達しているため、追加の感染は発生しません。")
+                return np.array([])  # 空の配列を返して感染を停止
+            else:
+                inds = inds[:allowed_infections]
+                print(f"感染者数が上限に達しそうなため、新規感染者を {allowed_infections} 人に制限します。")
+
+
+        # Update states, variant info, and flows
+        n_infections = len(inds)
+        self.susceptible[inds]    = False
+        self.naive[inds]          = False
+        self.recovered[inds]      = False
+        self.diagnosed[inds]      = False
+        self.exposed[inds]        = True
+        self.n_infections[inds]  += 1
+        self.n_breakthroughs[breakthrough_inds] += 1
+        self.exposed_variant[inds] = variant
+        self.exposed_by_variant[variant, inds] = True
+        self.flows['new_infections']   += n_infections
+        self.flows['new_reinfections'] += len(cvu.defined(self.date_recovered[inds])) # Record reinfections
+        self.flows_variant['new_infections_by_variant'][variant] += n_infections
+
+        # Record transmissions
+        for i, target in enumerate(inds):
+            entry = dict(source=source[i] if source is not None else None, target=target, date=self.t, layer=layer, variant=variant_label)
+            self.infection_log.append(entry)
+
+        # Calculate how long before this person can infect other people
+        self.dur_exp2inf[inds] = cvu.sample(**durpars['exp2inf'], size=n_infections)
+        self.date_exposed[inds]   = self.t
+        self.date_infectious[inds] = self.dur_exp2inf[inds] + self.t
+
+        # Reset all other dates
+        for key in ['date_symptomatic', 'date_severe', 'date_critical', 'date_diagnosed', 'date_recovered']:
+            self[key][inds] = np.nan
+
+        # Use prognosis probabilities to determine what happens to them
+        symp_probs = infect_pars['rel_symp_prob']*self.symp_prob[inds]*(1-self.symp_imm[variant, inds]) # Calculate their actual probability of being symptomatic
+        is_symp = cvu.binomial_arr(symp_probs) # Determine if they develop symptoms
+        symp_inds = inds[is_symp]
+        asymp_inds = inds[~is_symp] # Asymptomatic
+        self.flows_variant['new_symptomatic_by_variant'][variant] += len(symp_inds)
+
+        # CASE 1: Asymptomatic: may infect others, but have no symptoms and do not die
+        dur_asym2rec = cvu.sample(**durpars['asym2rec'], size=len(asymp_inds))
+        self.date_recovered[asymp_inds] = self.date_infectious[asymp_inds] + dur_asym2rec  # Date they recover
+        self.dur_disease[asymp_inds] = self.dur_exp2inf[asymp_inds] + dur_asym2rec  # Store how long this person had COVID-19
+
+        # CASE 2: Symptomatic: can either be mild, severe, or critical
+        n_symp_inds = len(symp_inds)
+        self.dur_inf2sym[symp_inds] = cvu.sample(**durpars['inf2sym'], size=n_symp_inds) # Store how long this person took to develop symptoms
+        self.date_symptomatic[symp_inds] = self.date_infectious[symp_inds] + self.dur_inf2sym[symp_inds] # Date they become symptomatic
+        sev_probs = infect_pars['rel_severe_prob'] * self.severe_prob[symp_inds]*(1-self.sev_imm[variant, symp_inds]) # Probability of these people being severe
+        is_sev = cvu.binomial_arr(sev_probs) # See if they're a severe or mild case
+        sev_inds = symp_inds[is_sev]
+        mild_inds = symp_inds[~is_sev] # Not severe
+        self.flows_variant['new_severe_by_variant'][variant] += len(sev_inds)
+
+        # CASE 2.1: Mild symptoms, no hospitalization required and no probability of death
+        dur_mild2rec = cvu.sample(**durpars['mild2rec'], size=len(mild_inds))
+        self.date_recovered[mild_inds] = self.date_symptomatic[mild_inds] + dur_mild2rec  # Date they recover
+        self.dur_disease[mild_inds] = self.dur_exp2inf[mild_inds] + self.dur_inf2sym[mild_inds] + dur_mild2rec  # Store how long this person had COVID-19
+
+        # CASE 2.2: Severe cases: hospitalization required, may become critical
+        self.dur_sym2sev[sev_inds] = cvu.sample(**durpars['sym2sev'], size=len(sev_inds)) # Store how long this person took to develop severe symptoms
+        self.date_severe[sev_inds] = self.date_symptomatic[sev_inds] + self.dur_sym2sev[sev_inds]  # Date symptoms become severe
+        crit_probs = infect_pars['rel_crit_prob'] * self.crit_prob[sev_inds] * (self.pars['no_hosp_factor'] if hosp_max else 1.) # Probability of these people becoming critical - higher if no beds available
+        is_crit = cvu.binomial_arr(crit_probs)  # See if they're a critical case
+        crit_inds = sev_inds[is_crit]
+        non_crit_inds = sev_inds[~is_crit]
+
+        # CASE 2.2.1 Not critical - they will recover
+        dur_sev2rec = cvu.sample(**durpars['sev2rec'], size=len(non_crit_inds))
+        self.date_recovered[non_crit_inds] = self.date_severe[non_crit_inds] + dur_sev2rec  # Date they recover
+        self.dur_disease[non_crit_inds] = self.dur_exp2inf[non_crit_inds] + self.dur_inf2sym[non_crit_inds] + self.dur_sym2sev[non_crit_inds] + dur_sev2rec  # Store how long this person had COVID-19
+
+        # CASE 2.2.2: Critical cases: ICU required, may die
+        self.dur_sev2crit[crit_inds] = cvu.sample(**durpars['sev2crit'], size=len(crit_inds))
+        self.date_critical[crit_inds] = self.date_severe[crit_inds] + self.dur_sev2crit[crit_inds]  # Date they become critical
+        death_probs = infect_pars['rel_death_prob'] * self.death_prob[crit_inds] * (self.pars['no_icu_factor'] if icu_max else 1.)# Probability they'll die
+        is_dead = cvu.binomial_arr(death_probs)  # Death outcome
+        dead_inds = crit_inds[is_dead]
+        alive_inds = crit_inds[~is_dead]
+
+        # CASE 2.2.2.1: Did not die
+        dur_crit2rec = cvu.sample(**durpars['crit2rec'], size=len(alive_inds))
+        self.date_recovered[alive_inds] = self.date_critical[alive_inds] + dur_crit2rec # Date they recover
+        self.dur_disease[alive_inds] = self.dur_exp2inf[alive_inds] + self.dur_inf2sym[alive_inds] + self.dur_sym2sev[alive_inds] + self.dur_sev2crit[alive_inds] + dur_crit2rec  # Store how long this person had COVID-19
+
+        # CASE 2.2.2.2: Did die
+        dur_crit2die = cvu.sample(**durpars['crit2die'], size=len(dead_inds))
+        self.date_dead[dead_inds] = self.date_critical[dead_inds] + dur_crit2die # Date of death
+        self.dur_disease[dead_inds] = self.dur_exp2inf[dead_inds] + self.dur_inf2sym[dead_inds] + self.dur_sym2sev[dead_inds] + self.dur_sev2crit[dead_inds] + dur_crit2die   # Store how long this person had COVID-19
+        self.date_recovered[dead_inds] = np.nan # If they did die, remove them from recovered
+
+        # Handle immunity aspects
+        if self.pars['use_waning']:
+            symp = dict(asymp=asymp_inds, mild=mild_inds, sev=sev_inds)
+            cvi.update_peak_nab(self, inds, nab_pars=self.pars, symp=symp)
+
+        return inds # For incrementing counters
+    
+     
 
     def infect(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0):
         '''

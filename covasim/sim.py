@@ -536,13 +536,14 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def init_infections(self, force=False, verbose=None):
+    def init_infections(self, force=False, verbose=None,event_type=None,threshold=20):
         '''
         Initialize prior immunity and seed infections.
 
         Args:
             force (bool): initialize prior infections even if already initialized
         '''
+        
 
         if verbose is None:
             verbose = self['verbose']
@@ -559,7 +560,7 @@ class Sim(cvb.BaseSim):
             if self['pop_infected']:
                 inds = cvu.choose(self['pop_size'], self['pop_infected'])
                 self.people.infect(inds=inds, layer='seed_infection') # Not counted by results since flows are re-initialized during the step
-
+                    
         elif verbose:
             print(f'People already initialized with {self.people.count_not("naive")} people non-naive and {self.people.count("exposed")} exposed; not reinitializing')
 
@@ -707,9 +708,6 @@ class Sim(cvb.BaseSim):
         self.results['pop_protection'][t]      = np.nanmean(people.sus_imm)
         self.results['pop_symp_protection'][t] = np.nanmean(people.symp_imm)
         
-        #追加部分
-        #テスト
-        #print(self.people.infection_log())
         
         self.results['elderly_infectious'][t] =  sum((self.people.infectious) & (self.people.age >= 65))
         
@@ -727,7 +725,7 @@ class Sim(cvb.BaseSim):
 
 
 #追加関数，感染者数がN人以上にならない介入をする
-    def step_infect_block(self,threshold=20,min_age=0,max_age=None):
+    def step_infect_block(self,event_type="n_exposed",threshold=20,min_age=0,max_age=None):
         '''
         Step the simulation forward in time. Usually, the user would use sim.run()
         rather than calling sim.step() directly.
@@ -738,10 +736,14 @@ class Sim(cvb.BaseSim):
             raise AlreadyRunError('Simulation already complete (call sim.initialize() to re-run)')
 
         t = self.t
+        
+        
+            
 
         # If it's the first timestep, infect people
         if t == 0:
             self.init_infections(verbose=False)
+            
 
         # Perform initial operations
         self.rescale() # Check if we need to rescale
@@ -756,8 +758,12 @@ class Sim(cvb.BaseSim):
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
             if n_imports>0:
                 importation_inds = cvu.choose(max_n=self['pop_size'], n=n_imports)
-                people.infect_block(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',threshold=threshold)
+                new_infect_inds = people.infect_block(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',event_type=event_type,threshold=threshold)
                 self.results['n_imports'][t] += n_imports
+                
+                #新規感染者数計測の場合は閾値を減らす
+                if event_type == "new_exposed":
+                    threshold = threshold - len(new_infect_inds)
 
         # Add variants
         for variant in self['variants']:
@@ -819,7 +825,10 @@ class Sim(cvb.BaseSim):
                 pairs = [[p1,p2]] if not self._legacy_trans else [[p1,p2], [p2,p1]] # Support slower legacy method of calculation, but by default skip this loop
                 for p1,p2 in pairs:
                     source_inds, target_inds = cvu.compute_infections(beta, p1, p2, betas, rel_trans, rel_sus, legacy=self._legacy_trans)  # Calculate transmission!
-                    people.infect_block(inds=target_inds, hosp_max=hosp_max, icu_max=icu_max, source=source_inds, layer=lkey, variant=variant,threshold=threshold)  # Actually infect people
+                    new_infect_inds = people.infect_block(inds=target_inds, hosp_max=hosp_max, icu_max=icu_max, source=source_inds, layer=lkey, variant=variant,event_type=event_type,threshold=threshold)  # Actually infect people
+                    #新規感染者数計測の場合は閾値を減らす
+                    if event_type == "new_exposed":
+                        threshold = threshold - len(new_infect_inds)
 
         # Update counts for this time step: stocks
         for key in cvd.result_stocks.keys():
@@ -845,10 +854,6 @@ class Sim(cvb.BaseSim):
         self.results['pop_nabs'][t]            = np.sum(people.nab[inds_alive[cvu.true(people.nab[inds_alive])]])/len(inds_alive)
         self.results['pop_protection'][t]      = np.nanmean(people.sus_imm)
         self.results['pop_symp_protection'][t] = np.nanmean(people.symp_imm)
-        
-        #追加部分
-        #テスト
-        #print(self.people.infection_log())
         
         self.results['elderly_infectious'][t] =  sum((self.people.infectious) & (self.people.age >= 65))
         
@@ -951,7 +956,7 @@ class Sim(cvb.BaseSim):
     #追加関数
     #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
     #ここに感染防止機能を足しています．
-    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,threshold=20,min_age=0,max_age=None):
+    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,event_type="n_exposed",threshold=20,min_age=0,max_age=None):
         
         # 追加しました
         #print("時間経過or条件適合までをします")
@@ -1015,7 +1020,7 @@ class Sim(cvb.BaseSim):
                         sc.progressbar(self.t+1, self.npts, label=string, length=20, newline=True)
 
             # Do the heavy lifting -- actually run the model!
-            self.step_infect_block(threshold=threshold)
+            self.step_infect_block(event_type=event_type,threshold=threshold)
             
             #変数追加収集モード
             if more_data:

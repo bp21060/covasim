@@ -98,7 +98,7 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def initialize(self, reset=False, init_infections=True, **kwargs):
+    def initialize(self, reset=False, init_infections=True,event_type=None,threshold=20, **kwargs):
         '''
         Perform all initializations on the sim.
 
@@ -121,7 +121,7 @@ class Sim(cvb.BaseSim):
         self.init_variants() # Initialize the variants
         self.init_immunity() # initialize information about immunity (if use_waning=True)
         self.init_results() # After initializing the variant, create the results structure
-        self.init_people(reset=reset, init_infections=init_infections, **kwargs) # Create all the people (the heaviest step)
+        self.init_people(reset=reset, init_infections=init_infections,event_type=event_type,threshold=threshold, **kwargs) # Create all the people (the heaviest step)
         self.init_interventions()  # Initialize the interventions...
         self.init_analyzers()  # ...and the analyzers...
         self.validate_layer_pars() # Once the population is initialized, validate the layer parameters again
@@ -415,7 +415,7 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def init_people(self, popdict=None, init_infections=False, reset=False, verbose=None, **kwargs):
+    def init_people(self, popdict=None, init_infections=False, reset=False, verbose=None,event_type=None,threshold=20, **kwargs):
         '''
         Create the people.
 
@@ -447,8 +447,8 @@ class Sim(cvb.BaseSim):
         self.people = cvpop.make_people(self, reset=reset, verbose=verbose, **kwargs)
         self.people.initialize(sim_pars=self.pars) # Fully initialize the people
         self.reset_layer_pars(force=False) # Ensure that layer keys match the loaded population
-        if init_infections:
-            self.init_infections(verbose=verbose)
+        if init_infections and event_type==None:
+            self.init_infections(verbose=verbose,event_type=event_type,threshold=threshold)
 
         return self
 
@@ -544,6 +544,10 @@ class Sim(cvb.BaseSim):
             force (bool): initialize prior infections even if already initialized
         '''
         
+        #デバック
+        print("init_infectionsが起動されました．")
+        
+        inds = np.array([]) 
 
         if verbose is None:
             verbose = self['verbose']
@@ -559,12 +563,20 @@ class Sim(cvb.BaseSim):
             # Create the seed infections
             if self['pop_infected']:
                 inds = cvu.choose(self['pop_size'], self['pop_infected'])
-                self.people.infect(inds=inds, layer='seed_infection') # Not counted by results since flows are re-initialized during the step
-                    
+                
+                #デバック
+                print(len(inds))
+                
+                inds = self.people.infect_block(inds=inds, layer='seed_infection',event_type=event_type,threshold=threshold) # Not counted by results since flows are re-initialized during the step
+                
+                #デバック
+                print(len(inds))
+                
+                
         elif verbose:
             print(f'People already initialized with {self.people.count_not("naive")} people non-naive and {self.people.count("exposed")} exposed; not reinitializing')
 
-        return
+        return inds
 
 
     def rescale(self):
@@ -742,7 +754,10 @@ class Sim(cvb.BaseSim):
 
         # If it's the first timestep, infect people
         if t == 0:
-            self.init_infections(verbose=False)
+            new_infect_inds = self.init_infections(verbose=False,event_type=event_type,threshold=threshold)
+            #新規感染者数計測の場合は閾値を減らす
+            if event_type == "new_exposed":
+                threshold = threshold - len(new_infect_inds)
             
 
         # Perform initial operations

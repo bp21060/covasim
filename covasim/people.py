@@ -433,7 +433,7 @@ class People(cvb.BasePeople):
         return
     
     
-    def infect_block(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0,event_type="exposed",threshold=20):
+    def infect_block(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0,event=None):
         '''
         Infect people and determine their eventual outcomes.
 
@@ -495,29 +495,29 @@ class People(cvb.BasePeople):
             self.rel_trans[new_breakthrough_inds] *= self.pars['trans_redux']
             
             
-        
-        if event_type == "n_exposed": 
-            # 現在の感染者数を取得
-            current_exposed_count = self.count('exposed')
-            # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
-            if current_exposed_count + len(inds) > (threshold - 1):
-                allowed_infections = (threshold - 1) - current_exposed_count
-                if allowed_infections <= 0:
-                    print("イベント防止のため、追加の感染は発生しません。")
-                    return np.array([])  # 空の配列を返して感染を停止
-                else:
-                    inds = inds[:allowed_infections]
-                    print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
-        elif event_type == "new_exposed": 
-           # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
-           if len(inds) > (threshold - 1):
-               allowed_infections = (threshold - 1)
-               if allowed_infections <= 0:
-                   print("イベント防止のため、追加の感染は発生しません。")
-                   return np.array([])  # 空の配列を返して感染を停止
-               else:
-                   inds = inds[:allowed_infections]
-                   print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
+        if event != None :
+            if event.event_type == "n_exposed": 
+                # 現在の感染者数を取得
+                current_exposed_count = self.count('exposed')
+                # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
+                if current_exposed_count + len(inds) > (event.threshold - 1):
+                    allowed_infections = (event.threshold - 1) - current_exposed_count
+                    if allowed_infections <= 0:
+                        print("イベント防止のため、追加の感染は発生しません。")
+                        return np.array([])  # 空の配列を返して感染を停止
+                    else:
+                        inds = inds[:allowed_infections]
+                        print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
+            elif event.event_type == "new_exposed": 
+               # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
+               if len(inds) > (event.threshold - 1):
+                   allowed_infections = (event.threshold - 1)
+                   if allowed_infections <= 0:
+                       print("イベント防止のため、追加の感染は発生しません。")
+                       return np.array([])  # 空の配列を返して感染を停止
+                   else:
+                       inds = inds[:allowed_infections]
+                       print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
         
 
         # Update states, variant info, and flows

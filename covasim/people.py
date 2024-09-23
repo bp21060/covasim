@@ -496,29 +496,53 @@ class People(cvb.BasePeople):
             
             
         if event != None :
-            if event.event_type == "n_exposed": 
-                # 現在の感染者数を取得
-                current_exposed_count = self.count('exposed')
-                # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
-                if current_exposed_count + len(inds) > (event.threshold - 1):
-                    allowed_infections = (event.threshold - 1) - current_exposed_count
-                    if allowed_infections <= 0:
-                        print("イベント防止のため、追加の感染は発生しません。")
-                        return np.array([])  # 空の配列を返して感染を停止
-                    else:
-                        inds = inds[:allowed_infections]
-                        print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
-            elif event.event_type == "new_exposed": 
-               # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
-               if len(inds) > (event.threshold - 1):
-                   allowed_infections = (event.threshold - 1)
-                   if allowed_infections <= 0:
-                       print("イベント防止のため、追加の感染は発生しません。")
-                       return np.array([])  # 空の配列を返して感染を停止
-                   else:
-                       inds = inds[:allowed_infections]
-                       print(f"イベント防止のため、新規感染者を {allowed_infections} 人に制限します。")
-        
+            if event.event_type == "n_exposed" or event.event_type == "new_exposed":
+                target_inds = [] #年齢範囲の新規感染者数
+                other_inds = [] # 年齢範囲外の新規感染者数
+                
+                if event.max_age==None :
+                    # 年齢範囲の新規感染者数を取得
+                    target_inds = [x for x in inds if self.age[x] >= event.min_age]
+                    # 年齢範囲外の新規感染者数を取得
+                    other_inds = [x for x in inds if not self.age[x] >= event.min_age]
+                else:
+                    # 年齢範囲の新規感染者数を取得
+                    target_inds = [x for x in inds if self.age[x] >= event.min_age and self.age[x] < event.max_age]
+                    # 年齢範囲外の新規感染者数を取得
+                    other_inds = [x for x in inds if not  self.age[x] >= event.min_age and self.age[x] < event.max_age]
+                
+                
+                if event.event_type == "n_exposed": 
+                    #年齢範囲の既存の感染者数を取得
+                    if event.max_age==None :
+                        current_exposed_count = sum(self.exposed &  (self.age >=  event.min_age))
+                    else :
+                        current_exposed_count = sum(self.exposed &  (self.age >=  event.min_age) & (self.age <  event.max_age))
+                    
+                    # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
+                    if current_exposed_count + len(target_inds) > (event.threshold - 1):
+                        allowed_infections = (event.threshold - 1) - current_exposed_count
+                        print("イベント防止のため、新規感染者を制限します。")
+                        if allowed_infections <= 0:    
+                            target_inds = []  # 空の配列とする
+                        else:
+                            target_inds = target_inds[:allowed_infections]                       
+                elif event.event_type == "new_exposed": 
+                   # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
+                   if len(target_inds) > (event.threshold - 1):
+                       allowed_infections = (event.threshold - 1)
+                       print("イベント防止のため、新規感染者を制限します。")
+                       if allowed_infections <= 0:
+                           target_inds =  []  # 空の配列とする
+                       else:
+                           target_inds = target_inds[:allowed_infections]    
+                #最終的な感染者を導く
+                inds =  target_inds + other_inds
+                inds = np.array(inds)
+                
+                if len(inds)==0:
+                    return target_inds #感染者がいないので終わりにする
+                
 
         # Update states, variant info, and flows
         n_infections = len(inds)
@@ -552,6 +576,9 @@ class People(cvb.BasePeople):
         # Use prognosis probabilities to determine what happens to them
         symp_probs = infect_pars['rel_symp_prob']*self.symp_prob[inds]*(1-self.symp_imm[variant, inds]) # Calculate their actual probability of being symptomatic
         is_symp = cvu.binomial_arr(symp_probs) # Determine if they develop symptoms
+        
+        
+        
         symp_inds = inds[is_symp]
         asymp_inds = inds[~is_symp] # Asymptomatic
         self.flows_variant['new_symptomatic_by_variant'][variant] += len(symp_inds)
@@ -613,7 +640,7 @@ class People(cvb.BasePeople):
             symp = dict(asymp=asymp_inds, mild=mild_inds, sev=sev_inds)
             cvi.update_peak_nab(self, inds, nab_pars=self.pars, symp=symp)
 
-        return inds # For incrementing counters
+        return target_inds # For incrementing counters
     
      
 

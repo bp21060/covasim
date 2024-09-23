@@ -544,8 +544,6 @@ class Sim(cvb.BaseSim):
             force (bool): initialize prior infections even if already initialized
         '''
         
-        #デバック
-        print("init_infectionsが起動されました．")
         
         inds = np.array([]) 
 
@@ -843,10 +841,14 @@ class Sim(cvb.BaseSim):
                 for p1,p2 in pairs:
                     source_inds, target_inds = cvu.compute_infections(beta, p1, p2, betas, rel_trans, rel_sus, legacy=self._legacy_trans)  # Calculate transmission!
                     new_infect_inds = people.infect_block(inds=target_inds, hosp_max=hosp_max, icu_max=icu_max, source=source_inds, layer=lkey, variant=variant,event=event)  # Actually infect people
+                    
                     #新規感染者数計測の場合は閾値を減らす
                     if event != None :    
                         if event.event_type == "new_exposed":
                             event.threshold = event.threshold - len(new_infect_inds)
+                    #デバック
+                    print(f"new_infect_inds={new_infect_inds}")
+                    print(f"event.threshold={event.threshold}")
 
         # Update counts for this time step: stocks
         for key in cvd.result_stocks.keys():

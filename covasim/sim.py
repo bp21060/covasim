@@ -447,7 +447,7 @@ class Sim(cvb.BaseSim):
         self.people = cvpop.make_people(self, reset=reset, verbose=verbose, **kwargs)
         self.people.initialize(sim_pars=self.pars) # Fully initialize the people
         self.reset_layer_pars(force=False) # Ensure that layer keys match the loaded population
-        if init_infections and (event==None or event.event_type ==None):
+        if init_infections and event==None:
             self.init_infections(verbose=verbose,event=event)
 
         return self
@@ -563,12 +563,12 @@ class Sim(cvb.BaseSim):
                 inds = cvu.choose(self['pop_size'], self['pop_infected'])
                 
                 #デバック
-                print(len(inds))
+                #print(len(inds))
                 
                 inds = self.people.infect_block(inds=inds, layer='seed_infection',event=event) # Not counted by results since flows are re-initialized during the step
                 
                 #デバック
-                print(len(inds))
+                #print(len(inds))
                 
                 
         elif verbose:
@@ -755,7 +755,7 @@ class Sim(cvb.BaseSim):
             new_infect_inds = self.init_infections(verbose=False,event=event)
             #新規感染者数計測の場合は閾値を減らす
             if event != None :    
-                if event.event_type == "new_exposed":
+                if event.measurement == "new" and event.condition == "exposed":
                     event.threshold = event.threshold - len(new_infect_inds)
             
 
@@ -777,7 +777,7 @@ class Sim(cvb.BaseSim):
                 
                 #新規感染者数計測の場合は閾値を減らす
                 if event != None :    
-                    if event.event_type == "new_exposed":
+                    if event.measurement == "new" and event.condition == "exposed":
                         event.threshold = event.threshold - len(new_infect_inds)
 
         # Add variants
@@ -844,11 +844,8 @@ class Sim(cvb.BaseSim):
                     
                     #新規感染者数計測の場合は閾値を減らす
                     if event != None :    
-                        if event.event_type == "new_exposed":
+                        if event.measurement == "new" and event.condition == "exposed":
                             event.threshold = event.threshold - len(new_infect_inds)
-                    #デバック
-                    print(f"new_infect_inds={new_infect_inds}")
-                    print(f"event.threshold={event.threshold}")
 
         # Update counts for this time step: stocks
         for key in cvd.result_stocks.keys():

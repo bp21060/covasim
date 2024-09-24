@@ -969,6 +969,56 @@ class Sim(cvb.BaseSim):
         return self
     
     
+    #num_targetを求める．
+    def cul_num_target(self,event=None):
+        if event==None:
+            return 0
+        # tの大きさがすでに更新されているのでもとに戻す
+        self.t = self.t - 1
+    
+        # 病態を格納する辞書を作成
+        conditions_dict = {
+            'exposed': 'exposed',
+            'infectious': 'infectious',
+            'symptomatic': 'symptomatic',
+            'severe': 'severe',
+            'critical': 'critical'
+        }
+        
+        # condition が存在しない場合はエラーを出す
+        if event.condition not in conditions_dict:
+            raise ValueError(f"指定された条件 '{event.condition}' は存在しません。以下のいずれかを指定してください: {list(conditions_dict.keys())}")
+        
+        # 初期化が必要かチェック
+        if self.t == 0:
+            num_people = len(self.people.exposed)
+            event.last_condition = np.full(num_people, False, dtype=bool)
+        
+        # 動的に状態の変化を検出する
+        new_condition = getattr(self.people, event.condition) & ~(event.last_condition)
+        
+        # 状態の更新
+        event.last_condition = copy.deepcopy(getattr(self.people, event.condition))
+        
+        #年齢フィルターを当てはめる
+        if event.max_age == None :
+            age_mask = (self.people.age >= event.min_age)
+        else :
+            age_mask = (self.people.age >= event.min_age) & (self.people.age < event.max_age)
+        num_target = sum(new_condition & age_mask)
+        
+        #デバック
+        print(f"t={self.t}")
+        print(f"既存病態者数{sum(event.last_condition)}")
+        print(f"新規病態者数{sum(new_condition)}")
+        print(f"num_target={num_target}")
+        
+        # tをもとに戻す
+        self.t = self.t + 1
+        
+        return num_target
+
+        
     
     #追加関数
     #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
@@ -1010,7 +1060,7 @@ class Sim(cvb.BaseSim):
         if errormsg:
             raise AlreadyRunError(errormsg)
         
-
+        
         #icuの条件を満たしているかどうか
         icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
         
@@ -1039,8 +1089,17 @@ class Sim(cvb.BaseSim):
             # Do the heavy lifting -- actually run the model!
             
             #eventはステップごとに初期化するのでここで初期化
-            initialized_event=copy.deepcopy(event)
-            self.step_infect_block(event=initialized_event)
+            if event != None :
+                event.init_threshold(self.t)
+            self.step_infect_block(event=event)
+            
+            #num_targetを求める．
+            num_target = self.cul_num_target(event=event)
+            
+            #複数日の合計の場合は閾値の更新をする
+            if event != None :
+                if event.days > 1:
+                    event.update(self.t,num_target)
             
             #変数追加収集モード
             if more_data:

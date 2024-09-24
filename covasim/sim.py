@@ -762,7 +762,7 @@ class Sim(cvb.BaseSim):
         # Perform initial operations
         self.rescale() # Check if we need to rescale
         people   = self.people # Shorten this for later use
-        people.update_states_pre(t=t) # Update the state of everyone and count the flows
+        people.update_states_pre(t=t,event=event) # Update the state of everyone and count the flows
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint

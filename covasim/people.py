@@ -49,6 +49,9 @@ class People(cvb.BasePeople):
         # Handle pars and population size
         self.set_pars(pars)
         self.version = cvv.__version__ # Store version info
+        
+        #イベントの仮設定
+        self.event = None
 
         # Other initialization
         self.t = 0 # Keep current simulation time
@@ -219,6 +222,8 @@ class People(cvb.BasePeople):
         has_date = cvu.idefinedi(date, not_current)
         inds     = cvu.itrue(self.t >= date[has_date], has_date)
         return inds
+    
+    
     
     
     #イベントによる感染・病態遷移を宣言する関数

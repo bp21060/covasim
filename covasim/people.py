@@ -493,10 +493,12 @@ class People(cvb.BasePeople):
             no_prior_breakthrough = (self.n_breakthroughs[breakthrough_inds] == 0) # We only adjust transmissibility for the first breakthrough
             new_breakthrough_inds = breakthrough_inds[no_prior_breakthrough]
             self.rel_trans[new_breakthrough_inds] *= self.pars['trans_redux']
+         
             
+        
             
         if event != None :
-            if event.event_type == "n_exposed" or event.event_type == "new_exposed":
+            if event.condition == "exposed":
                 target_inds = [] #年齢範囲の新規感染者数
                 other_inds = [] # 年齢範囲外の新規感染者数
                 
@@ -504,15 +506,16 @@ class People(cvb.BasePeople):
                     # 年齢範囲の新規感染者数を取得
                     target_inds = [x for x in inds if self.age[x] >= event.min_age]
                     # 年齢範囲外の新規感染者数を取得
-                    other_inds = [x for x in inds if not self.age[x] >= event.min_age]
+                    other_inds = [x for x in inds if not (self.age[x] >= event.min_age)]
                 else:
                     # 年齢範囲の新規感染者数を取得
                     target_inds = [x for x in inds if self.age[x] >= event.min_age and self.age[x] < event.max_age]
                     # 年齢範囲外の新規感染者数を取得
-                    other_inds = [x for x in inds if not  self.age[x] >= event.min_age and self.age[x] < event.max_age]
+                    other_inds = [x for x in inds if not  (self.age[x] >= event.min_age and self.age[x] < event.max_age)]
                 
                 
-                if event.event_type == "n_exposed": 
+                
+                if event.measurement == "n": 
                     #年齢範囲の既存の感染者数を取得
                     if event.max_age==None :
                         current_exposed_count = sum(self.exposed &  (self.age >=  event.min_age))
@@ -527,7 +530,7 @@ class People(cvb.BasePeople):
                             target_inds = []  # 空の配列とする
                         else:
                             target_inds = target_inds[:allowed_infections]                       
-                elif event.event_type == "new_exposed": 
+                elif event.measurement == "new": 
                    # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
                    if len(target_inds) > (event.threshold - 1):
                        allowed_infections = (event.threshold - 1)
@@ -535,13 +538,16 @@ class People(cvb.BasePeople):
                        if allowed_infections <= 0:
                            target_inds =  []  # 空の配列とする
                        else:
-                           target_inds = target_inds[:allowed_infections]    
+                           target_inds = target_inds[:allowed_infections] 
+                           
+                
                 #最終的な感染者を導く
                 inds =  target_inds + other_inds
                 inds = np.array(inds)
                 
                 if len(inds)==0:
                     return target_inds #感染者がいないので終わりにする
+        
                 
 
         # Update states, variant info, and flows

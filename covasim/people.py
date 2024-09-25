@@ -547,7 +547,7 @@ class People(cvb.BasePeople):
         return
     
     
-    def infect_block(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0,event=None):
+    def infect_block(self, inds, hosp_max=None, icu_max=None, source=None, layer=None, variant=0,events=None):
         '''
         Infect people and determine their eventual outcomes.
 
@@ -610,19 +610,20 @@ class People(cvb.BasePeople):
          
         #イベント制限があればここで制御する
         target_inds =[]
-        if event !=None:
-            if event.condition =="exposed":
-                current_count = 0
-                if event.measurement == "n": 
-                    #年齢範囲の既存の感染者数を取得
-                    if event.max_age==None :
-                        current_count = sum(self.exposed &  (self.age >=  event.min_age))
-                    else :
-                        current_count = sum(self.exposed &  (self.age >=  event.min_age) & (self.age <  event.max_age))
-
-                inds,target_inds = self.limit_target(inds=inds,event=event,current_count=current_count)
-                if len(inds)==0:
-                    return target_inds #感染者がいないので終わりにする
+        if events !=None:
+            for event in events:
+                if event.condition =="exposed":
+                    current_count = 0
+                    if event.measurement == "n": 
+                        #年齢範囲の既存の感染者数を取得
+                        if event.max_age==None :
+                            current_count = sum(self.exposed &  (self.age >=  event.min_age))
+                        else :
+                            current_count = sum(self.exposed &  (self.age >=  event.min_age) & (self.age <  event.max_age))
+    
+                    inds,target_inds = self.limit_target(inds=inds,event=event,current_count=current_count)
+                    if len(inds)==0:
+                        return target_inds #感染者がいないので終わりにする
 
         # Update states, variant info, and flows
         n_infections = len(inds)

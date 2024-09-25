@@ -20,7 +20,7 @@ class Event:
     
     def update(self,t,num_target):
         
-        inds = (t-1) % self.days #もう既に+1されているのでここで調整
+        inds = t % self.days 
         self.days_list[inds] = num_target
         
         #デバック

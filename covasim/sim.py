@@ -98,7 +98,7 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def initialize(self, reset=False, init_infections=True,event=None, **kwargs):
+    def initialize(self, reset=False, init_infections=True,events=None, **kwargs):
         '''
         Perform all initializations on the sim.
 
@@ -121,7 +121,7 @@ class Sim(cvb.BaseSim):
         self.init_variants() # Initialize the variants
         self.init_immunity() # initialize information about immunity (if use_waning=True)
         self.init_results() # After initializing the variant, create the results structure
-        self.init_people(reset=reset, init_infections=init_infections,event=event, **kwargs) # Create all the people (the heaviest step)
+        self.init_people(reset=reset, init_infections=init_infections,events=events, **kwargs) # Create all the people (the heaviest step)
         self.init_interventions()  # Initialize the interventions...
         self.init_analyzers()  # ...and the analyzers...
         self.validate_layer_pars() # Once the population is initialized, validate the layer parameters again
@@ -415,7 +415,7 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def init_people(self, popdict=None, init_infections=False, reset=False, verbose=None,event=None, **kwargs):
+    def init_people(self, popdict=None, init_infections=False, reset=False, verbose=None,events=None, **kwargs):
         '''
         Create the people.
 
@@ -447,8 +447,8 @@ class Sim(cvb.BaseSim):
         self.people = cvpop.make_people(self, reset=reset, verbose=verbose, **kwargs)
         self.people.initialize(sim_pars=self.pars) # Fully initialize the people
         self.reset_layer_pars(force=False) # Ensure that layer keys match the loaded population
-        if init_infections and event==None:
-            self.init_infections(verbose=verbose,event=event)
+        if init_infections and events==None:
+            self.init_infections(verbose=verbose)
 
         return self
 
@@ -536,7 +536,7 @@ class Sim(cvb.BaseSim):
         return
 
 
-    def init_infections(self, force=False, verbose=None,event=None):
+    def init_infections(self, force=False, verbose=None,events=None):
         '''
         Initialize prior immunity and seed infections.
 
@@ -565,7 +565,7 @@ class Sim(cvb.BaseSim):
                 #デバック
                 #print(len(inds))
                 
-                inds = self.people.infect_block(inds=inds, layer='seed_infection',event=event) # Not counted by results since flows are re-initialized during the step
+                inds = self.people.infect_block(inds=inds, layer='seed_infection',events=events) # Not counted by results since flows are re-initialized during the step
                 
                 #デバック
                 #print(len(inds))
@@ -735,7 +735,7 @@ class Sim(cvb.BaseSim):
 
 
 #追加関数，感染者数がN人以上にならない介入をする
-    def step_infect_block(self,event=None):
+    def step_infect_block(self,events=None):
         '''
         Step the simulation forward in time. Usually, the user would use sim.run()
         rather than calling sim.step() directly.
@@ -752,11 +752,12 @@ class Sim(cvb.BaseSim):
 
         # If it's the first timestep, infect people
         if t == 0:
-            new_infect_inds = self.init_infections(verbose=False,event=event)
+            new_infect_inds = self.init_infections(verbose=False,events=events)
             #新規感染者数計測の場合は閾値を減らす
-            if event != None :    
-                if event.measurement == "new" and event.condition == "exposed":
-                    event.threshold = event.threshold - len(new_infect_inds)
+            if events != None :
+                for event in events:
+                    if event.measurement == "new" and event.condition == "exposed":
+                        event.threshold = event.threshold - len(new_infect_inds)
             
 
         # Perform initial operations
@@ -970,8 +971,8 @@ class Sim(cvb.BaseSim):
     
     
     #num_targetを求める．
-    def cul_num_target(self,event=None):
-        if event==None:
+    def cul_num_target(self,events=None):
+        if events==None:
             return 0
         # tの大きさがすでに更新されているのでもとに戻す
         self.t = self.t - 1
@@ -985,45 +986,57 @@ class Sim(cvb.BaseSim):
             'critical': 'critical'
         }
         
-        # condition が存在しない場合はエラーを出す
-        if event.condition not in conditions_dict:
-            raise ValueError(f"指定された条件 '{event.condition}' は存在しません。以下のいずれかを指定してください: {list(conditions_dict.keys())}")
+        for event in events:
+            
+            # daysが2未満なら飛ばす
+            #days
+            if event.days < 2:
+                continue
+            
         
-        # 初期化が必要かチェック
-        if self.t == 0:
-            num_people = len(self.people.exposed)
-            event.last_condition = np.full(num_people, False, dtype=bool)
-        
-        # 動的に状態の変化を検出する
-        new_condition = getattr(self.people, event.condition) & ~(event.last_condition)
-        
-        # 状態の更新
-        event.last_condition = copy.deepcopy(getattr(self.people, event.condition))
-        
-        #年齢フィルターを当てはめる
-        if event.max_age == None :
-            age_mask = (self.people.age >= event.min_age)
-        else :
-            age_mask = (self.people.age >= event.min_age) & (self.people.age < event.max_age)
-        num_target = sum(new_condition & age_mask)
-        
-        #デバック
-        print(f"t={self.t}")
-        print(f"既存病態者数{sum(event.last_condition)}")
-        print(f"新規病態者数{sum(new_condition)}")
-        print(f"num_target={num_target}")
+            # condition が存在しない場合はエラーを出す
+            if event.condition not in conditions_dict:
+                raise ValueError(f"指定された条件 '{event.condition}' は存在しません。以下のいずれかを指定してください: {list(conditions_dict.keys())}")
+            
+            # 初期化が必要かチェック
+            if self.t == 0:
+                num_people = len(self.people.exposed)
+                event.last_condition = np.full(num_people, False, dtype=bool)
+            
+            # 動的に状態の変化を検出する
+            new_condition = getattr(self.people, event.condition) & ~(event.last_condition)
+            
+            # 状態の更新
+            event.last_condition = copy.deepcopy(getattr(self.people, event.condition))
+            
+            #年齢フィルターを当てはめる
+            if event.max_age == None :
+                age_mask = (self.people.age >= event.min_age)
+            else :
+                age_mask = (self.people.age >= event.min_age) & (self.people.age < event.max_age)
+            num_target = sum(new_condition & age_mask)
+            
+            #デバック
+            print(f"t={self.t}")
+            print(f"既存病態者数{sum(event.last_condition)}")
+            print(f"新規病態者数{sum(new_condition)}")
+            print(f"num_target={num_target}")
+            
+            
+            #num_targetを更新する
+            event.update(self.t,num_target)
         
         # tをもとに戻す
         self.t = self.t + 1
         
-        return num_target
+        return
 
         
     
     #追加関数
     #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
     #ここに感染防止機能を足しています．
-    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,event=None):
+    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,events=None):
         
         # 追加しました
         #print("時間経過or条件適合までをします")
@@ -1089,17 +1102,15 @@ class Sim(cvb.BaseSim):
             # Do the heavy lifting -- actually run the model!
             
             #eventはステップごとに初期化するのでここで初期化
-            if event != None :
-                event.init_threshold(self.t)
-            self.step_infect_block(event=event)
+            if events != None :
+                for event in events:
+                    event.init_threshold(self.t)
+                    
+            self.step_infect_block(events=events)
             
-            #num_targetを求める．
-            num_target = self.cul_num_target(event=event)
+            #num_targetを求めて更新する．
+            self.cul_num_target(events=events)
             
-            #複数日の合計の場合は閾値の更新をする
-            if event != None :
-                if event.days > 1:
-                    event.update(self.t,num_target)
             
             #変数追加収集モード
             if more_data:

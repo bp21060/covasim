@@ -732,6 +732,30 @@ class Sim(cvb.BaseSim):
             self.complete = True
 
         return
+    
+#追加関数，閾値更新のために対象の感染者がどれだけいるか調べる
+ #レイヤー制限と年齢制限はどちらか一つしかつけないのでこのコードで問題ないです．
+    def cul_num_target(self,inds,event,lkey=None):
+        # レイヤー
+        if event.layer != None:
+            if event.layer==lkey:
+                # 対象レイヤーの新規感染者数を取得
+                #感染レイヤー計測
+                layer_counts = self.people.count_infections_by_layer()
+                if event.layer in layer_counts:
+                    ans = layer_counts[event.layer] - event.last_loop_layer_counts
+                    event.last_loop_layer_counts = layer_counts[event.layer]
+                    return ans #num_targetを更新する
+            else: 
+                return 0
+        
+        if event.max_age==None :
+            # 年齢範囲の新規感染者数を取得
+            inds = [x for x in inds if self.people.age[x] >= event.min_age]
+        else:
+            # 年齢範囲の新規感染者数を取得
+            inds = [x for x in inds if self.people.age[x] >= event.min_age and self.people.age[x] < event.max_age]
+        return len(inds)
 
 
 #追加関数，感染者数がN人以上にならない介入をする
@@ -752,18 +776,20 @@ class Sim(cvb.BaseSim):
 
         # If it's the first timestep, infect people
         if t == 0:
-            new_infect_inds = self.init_infections(verbose=False,events=events)
+            inds = self.init_infections(verbose=False,events=events)
             #新規感染者数計測の場合は閾値を減らす
-            if events != None :
+            if events != None :    
                 for event in events:
                     if event.measurement == "new" and event.condition == "exposed":
-                        event.threshold = event.threshold - len(new_infect_inds)
+                        num_target = self.cul_num_target(inds=inds,event=event) #新規感染者にターゲット数を教えてもらう                                                
+                        event.threshold = event.threshold - num_target #閾値の更新をする                                           
+                    
             
 
         # Perform initial operations
         self.rescale() # Check if we need to rescale
         people   = self.people # Shorten this for later use
-        people.update_states_pre(t=t,event=event) # Update the state of everyone and count the flows
+        people.update_states_pre(t=t,events=events) # Update the state of everyone and count the flows
         contacts = people.update_contacts() # Compute new contacts
         hosp_max = people.count('severe')   > self['n_beds_hosp'] if self['n_beds_hosp'] is not None else False # Check for acute bed constraint
         icu_max  = people.count('critical') > self['n_beds_icu']  if self['n_beds_icu']  is not None else False # Check for ICU bed constraint
@@ -773,13 +799,15 @@ class Sim(cvb.BaseSim):
             n_imports = cvu.poisson(self['n_imports']/self.rescale_vec[self.t]) # Imported cases
             if n_imports>0:
                 importation_inds = cvu.choose(max_n=self['pop_size'], n=n_imports)
-                new_infect_inds = people.infect_block(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',event=event)
+                inds = people.infect_block(inds=importation_inds, hosp_max=hosp_max, icu_max=icu_max, layer='importation',events=events)
                 self.results['n_imports'][t] += n_imports
                 
                 #新規感染者数計測の場合は閾値を減らす
-                if event != None :    
-                    if event.measurement == "new" and event.condition == "exposed":
-                        event.threshold = event.threshold - len(new_infect_inds)
+                if events != None :    
+                    for event in events:
+                        if event.measurement == "new" and event.condition == "exposed":
+                            num_target = self.cul_num_target(inds=inds,event=event) #新規感染者にターゲット数を教えてもらう
+                            event.threshold = event.threshold - num_target #閾値の更新をする．
 
         # Add variants
         for variant in self['variants']:
@@ -826,6 +854,10 @@ class Sim(cvb.BaseSim):
                 continue
 
             for lkey, layer in contacts.items():
+                
+                #デバック
+                #print(f"lkey={lkey}")
+                
                 p1 = layer['p1']
                 p2 = layer['p2']
                 betas = layer['beta']
@@ -841,12 +873,18 @@ class Sim(cvb.BaseSim):
                 pairs = [[p1,p2]] if not self._legacy_trans else [[p1,p2], [p2,p1]] # Support slower legacy method of calculation, but by default skip this loop
                 for p1,p2 in pairs:
                     source_inds, target_inds = cvu.compute_infections(beta, p1, p2, betas, rel_trans, rel_sus, legacy=self._legacy_trans)  # Calculate transmission!
-                    new_infect_inds = people.infect_block(inds=target_inds, hosp_max=hosp_max, icu_max=icu_max, source=source_inds, layer=lkey, variant=variant,event=event)  # Actually infect people
+                    inds = people.infect_block(inds=target_inds, hosp_max=hosp_max, icu_max=icu_max, source=source_inds, layer=lkey, variant=variant,events=events)  # Actually infect people
                     
                     #新規感染者数計測の場合は閾値を減らす
-                    if event != None :    
-                        if event.measurement == "new" and event.condition == "exposed":
-                            event.threshold = event.threshold - len(new_infect_inds)
+                    if events != None :    
+                        for event in events:
+                            if event.measurement == "new" and event.condition == "exposed":
+                                num_target = self.cul_num_target(inds=inds,event=event,lkey=lkey) #新規感染者にターゲット数を教えてもらう
+                                event.threshold = event.threshold - num_target #閾値の更新をする．
+                                
+                                #デバック
+                                #print(f"num_target={num_target}")
+                                #print(f"event.threshold={event.threshold}")
 
         # Update counts for this time step: stocks
         for key in cvd.result_stocks.keys():
@@ -970,10 +1008,12 @@ class Sim(cvb.BaseSim):
         return self
     
     
-    #num_targetを求める．
-    def cul_num_target(self,events=None):
+    #num_targetを求めて更新する．
+    def update_num_target(self,events=None):
         if events==None:
-            return 0
+            return 
+        
+        
         # tの大きさがすでに更新されているのでもとに戻す
         self.t = self.t - 1
     
@@ -986,6 +1026,7 @@ class Sim(cvb.BaseSim):
             'critical': 'critical'
         }
         
+        
         for event in events:
             
             # daysが2未満なら飛ばす
@@ -993,6 +1034,18 @@ class Sim(cvb.BaseSim):
             if event.days < 2:
                 continue
             
+            # レイヤー
+            if event.layer != None:
+                # 対象レイヤーの新規感染者数を取得
+                #感染レイヤー計測
+                layer_counts = self.people.count_infections_by_layer()
+                if event.layer in layer_counts:
+                    num_target = layer_counts[event.layer] - event.last_t_layer_counts
+                    event.last_t_layer_counts = layer_counts[event.layer]
+                    #num_targetを更新する
+                    event.update(self.t,num_target)
+                    continue
+                
         
             # condition が存在しない場合はエラーを出す
             if event.condition not in conditions_dict:
@@ -1108,8 +1161,10 @@ class Sim(cvb.BaseSim):
                     
             self.step_infect_block(events=events)
             
+            
+            
             #num_targetを求めて更新する．
-            self.cul_num_target(events=events)
+            self.update_num_target(events=events)
             
             
             #変数追加収集モード

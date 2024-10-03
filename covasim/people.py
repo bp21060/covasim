@@ -256,7 +256,7 @@ class People(cvb.BasePeople):
             # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
             if current_count + len(target_inds) > (event.threshold - 1):
                 allowed_infections = (event.threshold - 1) - current_count
-                print("イベント防止のため、対象者を制限します。")
+                #print("イベント防止のため、対象者を制限します。")
                 if allowed_infections <= 0:    
                     target_inds = []  # 空の配列とする
                 else:
@@ -265,7 +265,7 @@ class People(cvb.BasePeople):
            # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
            if len(target_inds) > (event.threshold - 1):
                allowed_infections = (event.threshold - 1)
-               print("イベント防止のため、対象者を制限します。")
+               #print("イベント防止のため、対象者を制限します。")
                if allowed_infections <= 0:
                    target_inds =  []  # 空の配列とする
                else:

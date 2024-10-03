@@ -1070,10 +1070,10 @@ class Sim(cvb.BaseSim):
             num_target = sum(new_condition & age_mask)
             
             #デバック
-            print(f"t={self.t}")
-            print(f"既存病態者数{sum(event.last_condition)}")
-            print(f"新規病態者数{sum(new_condition)}")
-            print(f"num_target={num_target}")
+            #print(f"t={self.t}")
+            #print(f"既存病態者数{sum(event.last_condition)}")
+            #print(f"新規病態者数{sum(new_condition)}")
+            #print(f"num_target={num_target}")
             
             
             #num_targetを更新する

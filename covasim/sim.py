@@ -942,7 +942,7 @@ class Sim(cvb.BaseSim):
         '''
         
         # 追加しました
-        print("追加しました．")
+        #print("追加しました．")
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()
@@ -1262,7 +1262,7 @@ class Sim(cvb.BaseSim):
             
             
             #icu_maxの定義を更新
-            icu_judge  = self.people.count('critical') < icu_num  if icu_num  is not None else True
+            icu_judge  = self.people.count('critical') <= icu_num  if icu_num  is not None else True
             
             #icu_judgeの条件が適合していたら完了とする
             if not icu_judge :
@@ -1480,7 +1480,7 @@ class Sim(cvb.BaseSim):
     def save_most_safety_point(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None):
         
         # 追加しました
-        print("リスクが顕在化しないパターンの生成を行います．")
+        #print("リスクが顕在化しないパターンの生成を行います．")
 
         # Initialization steps -- start the timer, initialize the sim and the seed, and check that the sim hasn't been run
         T = sc.timer()

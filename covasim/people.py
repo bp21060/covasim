@@ -241,31 +241,46 @@ class People(cvb.BasePeople):
         other_inds = [] # 年齢範囲外の新規感染者数
         
         if event.max_age==None :
-            # 年齢範囲の新規感染者数を取得
+            # 年齢範囲の対象者数を取得
             target_inds = [x for x in inds if self.age[x] >= event.min_age]
-            # 年齢範囲外の新規感染者数を取得
+            # 年齢範囲外の対象者数を取得
             other_inds = [x for x in inds if not (self.age[x] >= event.min_age)]
         else:
-            # 年齢範囲の新規感染者数を取得
+            # 年齢範囲の対象者数を取得
             target_inds = [x for x in inds if self.age[x] >= event.min_age and self.age[x] < event.max_age]
-            # 年齢範囲外の新規感染者数を取得
+            # 年齢範囲外の対象者数を取得
             other_inds = [x for x in inds if not  (self.age[x] >= event.min_age and self.age[x] < event.max_age)]
+        
         
         
         if event.measurement == "n": 
             # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
             if current_count + len(target_inds) > (event.threshold - 1):
                 allowed_infections = (event.threshold - 1) - current_count
+                
+                #デバック
+                #print("イベント防止のため、対象者を制限します。")
+                #print(f"len_target={len(target_inds)},threshold={event.threshold}")
+                
                 #print("イベント防止のため、対象者を制限します。")
                 if allowed_infections <= 0:    
                     target_inds = []  # 空の配列とする
                 else:
-                    target_inds = target_inds[:allowed_infections]                       
+                    target_inds = target_inds[:allowed_infections]  
+                    
+                    #デバック
+                    #print(f"len_target={len(target_inds)}")
+
+                     
         elif event.measurement == "new": 
            # もし新規感染者数を加えたら上限を超える場合は、余分な感染者を除外
            if len(target_inds) > (event.threshold - 1):
                allowed_infections = (event.threshold - 1)
+               
+               #デバック
                #print("イベント防止のため、対象者を制限します。")
+               #print(f"len_target={len(target_inds)},threshold={event.threshold}")
+               
                if allowed_infections <= 0:
                    target_inds =  []  # 空の配列とする
                else:
@@ -276,6 +291,9 @@ class People(cvb.BasePeople):
         inds =  target_inds + other_inds
         inds = np.array(inds)
         
+        #デバック
+        #print(f"len_inds={len(inds)}")
+        
         return inds
 
 
@@ -283,10 +301,15 @@ class People(cvb.BasePeople):
         ''' Check if they become infectious '''
         inds = self.check_inds_consider_order(self.exposed, self.date_infectious, filter_inds=self.is_exp)
         
+        #デバック
+        #print(f"len(inds)={len(inds)}")
+        
         #イベント制限があればここで制御する
         if events !=None:
             for event in events:
-                if event.condition =="infectious":
+                if event.condition =="infectious":  
+                    #年齢範囲の新規の対象者数を取得(年齢は考慮しない)
+                    inds = list(set(cvu.false(self.infectious)) & set(inds))
                     current_count = 0
                     if event.measurement == "n": 
                         #年齢範囲の既存の感染者数を取得
@@ -294,8 +317,9 @@ class People(cvb.BasePeople):
                             current_count = sum(self.infectious &  (self.age >=  event.min_age))
                         else :
                             current_count = sum(self.infectious &  (self.age >=  event.min_age) & (self.age <  event.max_age))
-    
+                                            
                     inds = self.limit_target(inds=inds,event=event,current_count=current_count)
+                   
                     if len(inds)==0:
                         return inds #感染者がいないので終わりにする
         
@@ -316,7 +340,9 @@ class People(cvb.BasePeople):
         #イベント制限があればここで制御する
         if events !=None:
             for event in events:
-                if event.condition =="symptomatic":
+                if event.condition =="symptomatic":  
+                    #年齢範囲の新規の対象者数を取得(年齢は考慮しない)
+                    inds = list(set(cvu.false(self.symptomatic)) & set(inds))
                     current_count = 0
                     if event.measurement == "n": 
                         #年齢範囲の既存の感染者数を取得
@@ -324,9 +350,10 @@ class People(cvb.BasePeople):
                             current_count = sum(self.symptomatic &  (self.age >=  event.min_age))
                         else :
                             current_count = sum(self.symptomatic &  (self.age >=  event.min_age) & (self.age <  event.max_age))
-    
+                                            
                     inds = self.limit_target(inds=inds,event=event,current_count=current_count)
-                    
+                   
+                                        
                     if len(inds)==0:
                         return inds #感染者がいないので終わりにする
         self.symptomatic[inds] = True
@@ -340,7 +367,9 @@ class People(cvb.BasePeople):
         #イベント制限があればここで制御する
         if events !=None:
             for event in events:
-                if event.condition =="severe":
+                if event.condition =="severe":  
+                    #年齢範囲の新規の対象者数を取得(年齢は考慮しない)
+                    inds = list(set(cvu.false(self.severe)) & set(inds))
                     current_count = 0
                     if event.measurement == "n": 
                         #年齢範囲の既存の感染者数を取得
@@ -348,9 +377,9 @@ class People(cvb.BasePeople):
                             current_count = sum(self.severe &  (self.age >=  event.min_age))
                         else :
                             current_count = sum(self.severe &  (self.age >=  event.min_age) & (self.age <  event.max_age))
-    
+                                            
                     inds = self.limit_target(inds=inds,event=event,current_count=current_count)
-                    
+                      
                     if len(inds)==0:
                         return inds #感染者がいないので終わりにする
         self.severe[inds] = True
@@ -360,10 +389,15 @@ class People(cvb.BasePeople):
     def check_critical(self,events=None):
         ''' Check for new progressions to critical '''
         inds = self.check_inds_consider_order(self.severe, self.date_critical, filter_inds=self.is_exp)
+        
+        
+        
         #イベント制限があればここで制御する
         if events !=None:
             for event in events:
-                if event.condition =="critical":
+                if event.condition =="critical":  
+                    #年齢範囲の新規の対象者数を取得(年齢は考慮しない)
+                    inds = list(set(cvu.false(self.critical)) & set(inds))
                     current_count = 0
                     if event.measurement == "n": 
                         #年齢範囲の既存の感染者数を取得
@@ -371,7 +405,7 @@ class People(cvb.BasePeople):
                             current_count = sum(self.critical &  (self.age >=  event.min_age))
                         else :
                             current_count = sum(self.critical &  (self.age >=  event.min_age) & (self.age <  event.max_age))
-                    
+                                            
                     inds = self.limit_target(inds=inds,event=event,current_count=current_count)
                     
                     if len(inds)==0:

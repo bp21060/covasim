@@ -1087,9 +1087,8 @@ class Sim(cvb.BaseSim):
         
     
     #追加関数
-    #死亡者数が5人超過or指定期間経過するまで実行を繰り返す
-    #ここに感染防止機能を足しています．
-    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,events=None):
+    #イベントの防止機能を付けたrun関数
+    def run_infect_block(self, do_plot=False, until=None, restore_pars=True, reset_seed=True, verbose=None, icu_num=None,more_data=False,events=None,condition_end = True):
         
         # 追加しました
         #print("時間経過or条件適合までをします")
@@ -1261,12 +1260,13 @@ class Sim(cvb.BaseSim):
                 self.t = self.t + 1 
             
             
-            #icu_maxの定義を更新
-            icu_judge  = self.people.count('critical') <= icu_num  if icu_num  is not None else True
-            
-            #icu_judgeの条件が適合していたら完了とする
-            if not icu_judge :
-                self.complete = True
+            if condition_end:
+                #icu_maxの定義を更新
+                icu_judge  = self.people.count('critical') <= icu_num  if icu_num  is not None else True
+                
+                #icu_judgeの条件が適合していたら完了とする
+                if not icu_judge :
+                    self.complete = True
 
         # If simulation reached the end, finalize the results
         if self.complete:

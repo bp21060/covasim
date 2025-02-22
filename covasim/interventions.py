@@ -200,6 +200,7 @@ def InterventionDict(which, pars):
         sequence        = sequence,
         change_beta     = change_beta,
         clip_edges      = clip_edges,
+        clip_edges_subtarget = clip_edges_subtarget,
         test_num        = test_num,
         test_prob       = test_prob,
         contact_tracing = contact_tracing,
@@ -524,7 +525,7 @@ class sequence(Intervention):
 
 #%% Beta interventions
 
-__all__+= ['change_beta', 'clip_edges']
+__all__+= ['change_beta', 'clip_edges','clip_edges_subtarget']
 
 
 class change_beta(Intervention):
@@ -584,6 +585,161 @@ class change_beta(Intervention):
                     sim['beta_layer'][lkey] = new_beta
 
         return
+
+class clip_edges_subtarget(Intervention):
+    '''
+    clip_edges を拡張し、subtarget が指定されていれば「特定の個人が含まれる接触のみ」を、
+    指定されていなければ「全員の接触を」削減/復元するクラス。
+
+    Args:
+        days      (int or array): 削減/復元を実施する日
+        changes   (float or array): 接触をどの割合にするか (1 = 変化なし, 0 = すべて削除)
+        layers    (str or list): 対象とする接触層(None の場合はすべての層)
+        subtarget (dict or None): サブターゲットを指定する辞書
+                                  （例: {'inds': array_of_inds, 'vals': 0.5}）
+        kwargs    (dict): 上位クラス (cv.Intervention) に渡す引数
+    '''
+
+    def __init__(self, days, changes, layers=None, subtarget=None,debug=False, **kwargs):
+        super().__init__(**kwargs)
+        self.days      = sc.dcp(days)
+        self.changes   = sc.dcp(changes)
+        self.layers    = sc.dcp(layers)
+        self.subtarget = subtarget
+        self.debug = debug
+        self.contacts  = None
+        return
+
+    def initialize(self, sim):
+        ''' 前処理：日付や変化量を加工し、介入先を準備 '''
+        super().initialize()
+        self.days    = process_days(sim, self.days)
+        self.changes = process_changes(sim, self.changes, self.days)
+        if self.layers is None:
+            self.layers = sim.layer_keys()
+        else:
+            self.layers = sc.tolist(self.layers)
+        # 削除したエッジを保管するための構造
+        self.contacts = cvb.Contacts(layer_keys=self.layers)
+        return
+
+    def apply(self, sim):
+        ''' 介入の実行：指定された日に応じて接触を削減 or 復元 '''
+        # 現在の日が self.days に含まれていれば実施
+        for ind in find_day(self.days, sim.t, interv=self, sim=sim):
+
+            # いま適用する接触割合
+            frac_keep = self.changes[ind]
+
+            # サブターゲットがない場合は「全員の接触」を削減 → 元の clip_edges の処理と同じ
+            if self.subtarget is None:
+                for lkey in self.layers:
+                    s_layer = sim.people.contacts[lkey]  # シミュレーション側のエッジ
+                    i_layer = self.contacts[lkey]        # すでに削除され保管中のエッジ
+                    n_sim = len(s_layer)
+                    n_int = len(i_layer)
+                    n_contacts = n_sim + n_int  # 合計のエッジ数
+                    
+                    if self.debug:
+                        #デバック
+                        print(f"元の接触ネットワーク数={len(s_layer)}")
+
+                    if n_contacts:
+                        current_prop = n_sim / n_contacts
+                        desired_prop = frac_keep
+                        prop_to_move = current_prop - desired_prop
+                        n_to_move = int(prop_to_move * n_contacts)
+
+                        if n_to_move > 0:
+                            # シミュレーションから intervention 側へ削除
+                            inds = cvu.choose(max_n=n_sim, n=n_to_move)
+                            to_move = s_layer.pop_inds(inds)
+                            i_layer.append(to_move)
+                        elif n_to_move < 0:
+                            # intervention 側から シミュレーションに復元
+                            n_to_move_abs = abs(n_to_move)
+                            inds = cvu.choose(max_n=n_int, n=n_to_move_abs)
+                            to_move = i_layer.pop_inds(inds)
+                            s_layer.append(to_move)
+
+                    else:
+                        # このレイヤーにエッジが無いなら警告
+                        warnmsg = f'Warning: clip_edges_subtarget() layer "{lkey}" has no edges.'
+                        cvm.warn(warnmsg)
+                    
+                    if self.debug:
+                        #デバック
+                        print(f"後の接触ネットワーク数={len(s_layer)}")
+
+            # サブターゲットがある場合 → 「サブターゲットが含まれるエッジのみ」を削減/復元
+            else:
+                subtarget_inds, _ = get_subtargets(self.subtarget, sim)
+                subtarget_inds = np.array(subtarget_inds)
+
+                for lkey in self.layers:
+                    s_layer = sim.people.contacts[lkey]
+                    i_layer = self.contacts[lkey]
+
+                    # サブターゲットに関連するエッジのみを抽出
+                    if len(subtarget_inds) > 0:
+                        p1_in_subtarget = np.in1d(s_layer['p1'], subtarget_inds)
+                        p2_in_subtarget = np.in1d(s_layer['p2'], subtarget_inds)
+                        st_mask = p1_in_subtarget | p2_in_subtarget
+                    else:
+                        # サブターゲットが空なら削減対象エッジはなし
+                        st_mask = np.zeros(len(s_layer), dtype=bool)
+
+                    # 今シミュレーションに存在するサブターゲット関連エッジ数
+                    n_st_in_sim = st_mask.sum()
+                    # intervention 側にある「サブターゲット関連エッジ」は別途管理したいが、
+                    # ここでは単純に i_layer 全部を復元候補として扱う
+                    n_int = len(i_layer)
+                    
+                    if self.debug:
+                        #デバック
+                        print(f"元の接触ネットワーク数={len(s_layer)}")
+
+                    n_contacts = n_st_in_sim + n_int
+                    if n_contacts > 0:
+                        current_prop = n_st_in_sim / n_contacts
+                        desired_prop = frac_keep
+                        prop_to_move = current_prop - desired_prop
+                        n_to_move = int(prop_to_move * n_contacts)
+
+                        if n_to_move > 0:
+                            # シミュレーションから intervention 側へ移動(削除)
+                            st_inds = cvu.true(st_mask)  # サブターゲット関連のエッジインデックス
+                            inds_to_remove = cvu.choose(max_n=len(st_inds), n=n_to_move)
+                            remove_these = st_inds[inds_to_remove]
+
+                            to_move = s_layer.pop_inds(remove_these)
+                            i_layer.append(to_move)
+
+                        elif n_to_move < 0:
+                            # intervention 側からシミュレーションへ移動(復元)
+                            n_to_move_abs = abs(n_to_move)
+                            inds = cvu.choose(max_n=n_int, n=n_to_move_abs)
+                            to_move = i_layer.pop_inds(inds)
+                            s_layer.append(to_move)
+                        # n_to_move = 0 の場合は何もしない
+                    else:
+                        pass  # サブターゲット関連のエッジが存在しない場合
+                        
+                    if self.debug:
+                        #デバック
+                        print(f"後の接触ネットワーク数={len(s_layer)}")
+
+        return
+
+    def finalize(self, sim):
+        ''' シミュレーション終了時の後処理 '''
+        super().finalize()
+        # 必要に応じて終了時にすべて復元するなどの処理を入れてもよい
+        # ここでは削除エッジの保管先を None にしてメモリを解放
+        self.contacts = None
+        return
+
+
 
 
 class clip_edges(Intervention):
@@ -645,7 +801,7 @@ class clip_edges(Intervention):
                 i_layer = self.contacts[lkey] # Contact layer in the intervention
                 n_sim = len(s_layer) # Number of contacts in the simulation layer
                 n_int = len(i_layer) # Number of contacts in the intervention layer
-                n_contacts = n_sim + n_int # Total number of contacts
+                n_contacts = n_sim + n_int # Total number of contacts               
                 if n_contacts:
                     current_prop = n_sim/n_contacts # Current proportion of contacts in the sim, e.g. 1.0 initially
                     desired_prop = self.changes[ind] # Desired proportion, e.g. 0.5
